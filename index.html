@@ -1,0 +1,3030 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>孵蛋像素版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: monospace;
+  color: #fff;
+  user-select: none;
+}
+#wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+#c {
+  border: 4px solid #444;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 720px;
+  height: 576px;
+  /* 增强文字清晰度 */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  font-smooth: never;
+  /* 确保背景清晰 */
+  background: #0a0a0a;
+}
+#btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 640px;
+}
+.bt {
+  background: #222;
+  border: 3px solid #555;
+  color: #fff;
+  padding: 10px 16px;
+  font-family: monospace;
+  font-size: 14px;
+  cursor: pointer;
+  min-width: 90px;
+  text-align: center;
+}
+.bt:hover { background: #333; border-color: #888; }
+.bt:active { background: #444; }
+.bt.off { border-color: #f55; color: #faa; }
+.bt .cooldown { color: #888; font-size: 11px; }
+#overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 10;
+}
+#overlay.show { display: flex; }
+#overlay .msg {
+  background: #1a1a2e;
+  border: 3px solid #555;
+  padding: 20px 28px;
+  max-width: 360px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.7;
+}
+#overlay .msg .title { font-size: 16px; color: #FFD700; margin-bottom: 8px; }
+#overlay .msg .pet { font-size: 18px; color: #FF69B4; margin: 8px 0; }
+#overlay button { padding: 8px 20px; font-family: monospace; }
+#evt {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  border: 2px solid #FFD700;
+  padding: 8px 16px;
+  font-size: 13px;
+  display: none;
+  z-index: 20;
+  text-align: center;
+  max-width: 300px;
+}
+#evt.show { display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="720" height="576"></canvas>
+  <div id="btns">
+    <button class="bt" id="btnHeat" onclick="toggleHeat()">🔥 加热<br><span class="cooldown" id="heatStatus">开启</span></button>
+    <button class="bt" id="btnIce" onclick="toggleIce()">🧊 冰袋<br><span class="cooldown" id="iceStatus">可用</span></button>
+    <button class="bt" id="btnPet" onclick="doPet()" style="display:none">🫂 抚摸<br><span class="cooldown" id="petCd">可用</span></button>
+    <button class="bt" id="btnFeed" onclick="doFeed()" style="display:none">🍖 喂食<br><span class="cooldown" id="feedStatus">可用</span></button>
+    <button class="bt" id="btnForage" onclick="doForage()">🔍 找食物<br><span class="cooldown" id="forageCd">可用</span></button>
+    <button class="bt" id="btnBreed" onclick="doSynthesize()">⚗️ 合成<br><span class="cooldown" id="breedStatus">可用</span></button>
+    <button class="bt" onclick="showAlbum()">📖 图鉴</button>
+    <button class="bt" onclick="resetGame()">🔄 重开</button>
+  </div>
+</div>
+<div id="evt"></div>
+<div id="overlay">
+  <div class="msg" id="overlayMsg"></div>
+  <button onclick="closeOverlay()">确定</button>
+</div>
+<script>
+// ─── Constants ──────────────────────────────────────────────────
+const DAY_SEC = 600, NGT_SEC = 300, CYCLE = DAY_SEC + NGT_SEC;
+const TEMP_MIN = 20, TEMP_MAX = 45, TEMP_OPT_MIN = 36.5, TEMP_OPT_MAX = 38.5;
+const POWER_MAX = 100, HEAT_DRAIN = 2, POWER_DAY_REGEN = 150, POWER_NGT_REGEN = 75;
+const HATCH_RATE = 1.5, HATCH_RATE_COLD = 0.5, HATCH_RATE_HOT = -1.0;
+const PET_COOLDOWN = 5, FEED_COOLDOWN = 120, FORAGE_COOLDOWN = 30;
+const INV_MAX = 10;
+const PET_MAX = 8; // 宠物上限
+
+// 基因类型
+const GENES = {
+  fire:   { name: '火', color: '#FF4500', icon: '🔥' },
+  water:  { name: '水', color: '#1E90FF', icon: '💧' },
+  grass:  { name: '草', color: '#32CD32', icon: '🌿' },
+  electric:{ name: '电', color: '#FFD700', icon: '⚡' },
+  ice:    { name: '冰', color: '#87CEEB', icon: '❄' },
+  dark:   { name: '暗', color: '#4B0082', icon: '🌑' },
+  light:  { name: '光', color: '#FFFACD', icon: '☀' },
+  wind:   { name: '风', color: '#98FB98', icon: '🌀' },
+};
+
+// 星级颜色
+const STAR_COLORS = ['', '#AAAAAA', '#DDDDDD', '#FFD700', '#FF69B4', '#FF4500'];
+
+// 经验表：每等级需要的累计经验
+const EXP_TABLE = [0, 100, 250, 500, 900, 1500, 2300, 3500, 5000, 7000, 10000];
+
+// ─── Palette ────────────────────────────────────────────────────
+const P = {
+  skyDay: '#87CEEB', skyNgt: '#0d1b2a',
+  sun: '#FFD700', moon: '#E0E0E0', star: '#FFFFFF',
+  ground: '#8B4513',
+  eggLight: '#FFF8DC', eggShd: '#D4A574', eggCrack: '#8B7355',
+  incBase: '#8B0000', incLight: '#CD5C5C', flame: ['#FF4500','#FF8C00','#FFD700'],
+  heart: '#FF69B4',
+  tempHot: '#FF4500', tempCold: '#00BFFF',
+  barBg: '#333', barFill: '#555',
+  white: '#FFFFFF', black: '#000000',
+  txt: '#FFFFFF', dim: '#AAAAAA',
+  happy: '#90EE90', warn: '#FFA500', danger: '#FF4444',
+  eggInt: '#FFE4B5',
+  grassLight: '#7CFC00', grassDark: '#228B22',
+  cloud: '#FFFFFF',
+  starFull: '#FFD700', starEmpty: '#444444',
+};
+
+// ─── State ──────────────────────────────────────────────────────
+let g = {
+  temp: 25,           // °C
+  hatchPct: 0,        // 0-100
+  intimacy: 50,      // 0-100
+  power: 80,         // 0-100
+  heatOn: false,
+  iceOn: false,      // 冰袋降温中
+  time: 0,           // seconds in cycle
+  isDay: true,
+  petCdLeft: 0,
+  feedCdLeft: 0,
+  forageCdLeft: 0,
+  hunger: 100,     // 饥饿度 0-100
+  lastTs: Date.now(),
+  inventory: { worm: 2, fruit: 1, treat: 0 },
+  eggs: [{ id: 1, temp: 25, hatch: 0, intimacy: 50 }],
+  pets: [],
+  nextHatchDay: 0,  // 第几天可以孵化下一只
+  eventCooldown: 0,
+  eventMsg: '',
+  eventTimer: 0,
+  crackStage: 0,      // 0-4 visual stage
+  babyName: '',
+  babyTraits: [],
+  isHatching: false,
+  hatchAnim: 0,
+  powerRegenTimer: 0,
+  feedTimer: 0,
+  dayCount: 0,
+  touchedToday: false,
+  currentPet: null,  // 当前显示的宠物
+  currentScene: 'incubator', // 'incubator' | 'pets'
+  sceneTransition: { active: false, progress: 0, from: 'incubator', to: 'pets' },
+};
+
+// ─── Sound System ────────────────────────────────────────────────
+let audioCtx = null;
+let soundEnabled = true; // 音效开关，默认开启
+
+// 初始化 AudioContext（需要用户交互后才能创建）
+function initAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+
+// 播放指定频率和时长的音调
+function playTone(freq, duration, type = 'sine', volume = 0.3, startTime = 0) {
+  if (!soundEnabled || !audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.value = volume;
+  gain.gain.setValueAtTime(volume, audioCtx.currentTime + startTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + startTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(audioCtx.currentTime + startTime);
+  osc.stop(audioCtx.currentTime + startTime + duration);
+}
+
+// 播放和弦
+function playChord(freqs, duration, type = 'sine', volume = 0.2) {
+  if (!soundEnabled || !audioCtx) return;
+  freqs.forEach(f => playTone(f, duration, type, volume));
+}
+
+// ─── 音效库 ──────────────────────────────────────────────────────
+
+// 孵化成功 - 上升音阶 + 和弦
+function soundHatch() {
+  if (!audioCtx) initAudio();
+  const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6
+  notes.forEach((n, i) => playTone(n, 0.3, 'sine', 0.25, i * 0.12));
+  playChord([1047, 1319, 1568], 0.5, 'sine', 0.15, 0.4); // C6, E6, G6
+}
+
+// 喂食 - 根据食物类型不同音效
+function soundFeed(type) {
+  if (!audioCtx) initAudio();
+  if (type === 'treat') {
+    // 零食：清脆的"叮"声
+    playTone(880, 0.1, 'sine', 0.3);
+    playTone(1100, 0.15, 'sine', 0.2, 0.05);
+  } else if (type === 'fruit') {
+    // 水果：柔和的"噗"声
+    playTone(440, 0.15, 'triangle', 0.25);
+    playTone(330, 0.2, 'triangle', 0.2, 0.08);
+  } else {
+    // 虫子：有趣的"吱"声
+    playTone(600, 0.08, 'square', 0.15);
+    playTone(800, 0.1, 'square', 0.12, 0.06);
+  }
+}
+
+// 抚摸 - 柔和的"噗"声
+function soundPet() {
+  if (!audioCtx) initAudio();
+  playTone(300, 0.12, 'sine', 0.2);
+  playTone(250, 0.15, 'sine', 0.15, 0.1);
+}
+
+// 合成成功 - 魔法般的闪烁声
+function soundSynth(mutation = false) {
+  if (!audioCtx) initAudio();
+  if (mutation) {
+    // 突变：惊喜的上滑音
+    playTone(400, 0.1, 'sine', 0.25);
+    playTone(600, 0.1, 'sine', 0.25, 0.08);
+    playTone(900, 0.15, 'sine', 0.25, 0.16);
+    playChord([900, 1120, 1350], 0.3, 'triangle', 0.15, 0.25);
+  } else {
+    // 普通合成：轻柔的上升音
+    playTone(523, 0.15, 'sine', 0.2);
+    playTone(659, 0.15, 'sine', 0.2, 0.12);
+    playTone(784, 0.2, 'sine', 0.2, 0.24);
+  }
+}
+
+// 觅食成功 - 轻快的"叮"声
+function soundForage() {
+  if (!audioCtx) initAudio();
+  playTone(880, 0.08, 'sine', 0.25);
+  playTone(1100, 0.1, 'sine', 0.2, 0.06);
+  playTone(1320, 0.12, 'sine', 0.15, 0.12);
+}
+
+// 加热开启 - 温暖的启动声
+function soundHeatOn() {
+  if (!audioCtx) initAudio();
+  playTone(150, 0.3, 'sawtooth', 0.15);
+  playTone(200, 0.25, 'sawtooth', 0.12, 0.1);
+}
+
+// 冰敷开启 - 清凉的冰冻声
+function soundIceOn() {
+  if (!audioCtx) initAudio();
+  playTone(1200, 0.1, 'sine', 0.2);
+  playTone(900, 0.15, 'sine', 0.15, 0.08);
+  playTone(600, 0.2, 'sine', 0.1, 0.15);
+}
+
+// 随机事件提示 - 轻柔的提示音
+function soundEvent() {
+  if (!audioCtx) initAudio();
+  playTone(660, 0.1, 'sine', 0.15);
+  playTone(880, 0.12, 'sine', 0.12, 0.1);
+}
+
+// 宠物离开 - 悲伤的下行音
+function soundPetLeave() {
+  if (!audioCtx) initAudio();
+  playTone(400, 0.2, 'sine', 0.2);
+  playTone(350, 0.2, 'sine', 0.18, 0.15);
+  playTone(300, 0.25, 'sine', 0.15, 0.3);
+  playTone(250, 0.3, 'sine', 0.1, 0.45);
+}
+
+// 升级 - 庆祝的上行音阶
+function soundLevelUp() {
+  if (!audioCtx) initAudio();
+  const notes = [523, 587, 659, 698, 784, 880, 988, 1047];
+  notes.forEach((n, i) => playTone(n, 0.15, 'sine', 0.2, i * 0.08));
+}
+
+// 场景切换 - 平滑的过渡音
+function soundSceneSwitch() {
+  if (!audioCtx) initAudio();
+  playTone(440, 0.08, 'sine', 0.15);
+  playTone(550, 0.08, 'sine', 0.12, 0.05);
+}
+
+// 警告音 - 急促的警报声
+function soundWarning() {
+  if (!audioCtx) initAudio();
+  for (let i = 0; i < 3; i++) {
+    playTone(800, 0.1, 'square', 0.15, i * 0.15);
+    playTone(600, 0.1, 'square', 0.12, i * 0.15 + 0.05);
+  }
+}
+
+// 裂纹音效 - 破裂声
+function soundCrack() {
+  if (!audioCtx) initAudio();
+  playTone(100, 0.1, 'sawtooth', 0.2);
+  playTone(80, 0.15, 'sawtooth', 0.15, 0.05);
+  playTone(120, 0.1, 'sawtooth', 0.1, 0.1);
+}
+
+// 弹窗关闭 - 轻微的确认音
+function soundClose() {
+  if (!audioCtx) initAudio();
+  playTone(330, 0.08, 'sine', 0.12);
+}
+
+// 统一音效接口
+const SOUNDS = {
+  hatch: soundHatch,
+  feedTreat: () => soundFeed('treat'),
+  feedFruit: () => soundFeed('fruit'),
+  feedWorm: () => soundFeed('worm'),
+  pet: soundPet,
+  synth: () => soundSynth(false),
+  synthMutation: () => soundSynth(true),
+  forage: soundForage,
+  heatOn: soundHeatOn,
+  iceOn: soundIceOn,
+  event: soundEvent,
+  petLeave: soundPetLeave,
+  levelUp: soundLevelUp,
+  sceneSwitch: soundSceneSwitch,
+  warning: soundWarning,
+  crack: soundCrack,
+  close: soundClose,
+};
+
+function playSound(name) {
+  if (SOUNDS[name]) SOUNDS[name]();
+}
+
+// ─── Canvas ─────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// 画布点击检测（宠物列表 + 场景切换）
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = 720 / rect.width;
+  const scaleY = 576 / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+
+  // 场景切换按钮区域（左右两侧大箭头）
+  // 左箭头：x: 0-40, y: 200-380
+  if (g.currentScene === 'pets' && mx >= 0 && mx <= 50 && my >= 200 && my <= 380) {
+    if (!g.sceneTransition.active) {
+      initAudio();
+      playSound('sceneSwitch');
+      g.sceneTransition = { active: true, progress: 0, from: 'pets', to: 'incubator' };
+    }
+    return;
+  }
+  // 右箭头：x: 680-720, y: 200-380
+  if (g.currentScene === 'incubator' && g.currentPet && mx >= 670 && mx <= 720 && my >= 200 && my <= 380) {
+    if (!g.sceneTransition.active) {
+      initAudio();
+      playSound('sceneSwitch');
+      g.sceneTransition = { active: true, progress: 0, from: 'incubator', to: 'pets' };
+    }
+    return;
+  }
+
+  // 检查是否点击了底部宠物列表
+  for (const r of petListRegions) {
+    if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+      showPetDetail(r.idx);
+      return;
+    }
+  }
+});
+
+// ─── Pixel helpers ───────────────────────────────────────────────
+function px(x, y, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x), Math.floor(y), 1, 1);
+}
+function rect(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+}
+function pxText(str, x, y, color, sz = 1) {
+  // minimal 3x5 pixel font
+  const font = {
+    '0':[[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+    '1':[[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+    '2':[[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]],
+    '3':[[1,1,1],[0,0,1],[1,1,1],[0,0,1],[1,1,1]],
+    '4':[[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
+    '5':[[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+    '6':[[1,1,1],[1,0,0],[1,1,1],[1,0,1],[1,1,1]],
+    '7':[[1,1,1],[0,0,1],[0,0,1],[0,0,1],[0,0,1]],
+    '8':[[1,1,1],[1,0,1],[1,1,1],[1,0,1],[1,1,1]],
+    '9':[[1,1,1],[1,0,1],[1,1,1],[0,0,1],[1,1,1]],
+    '.':[[0],[0],[0],[0],[1]],
+    ':':[[0],[1],[0],[1],[0]],
+    '°':[[0,1,0,0],[1,1,1,0],[0,1,0,0],[0,0,0,0],[0,0,0,0]],
+    'C':[[1,1,1],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+    '%':[[1,0,1],[0,1,0],[0,1,0],[1,0,0],[0,1,0]],
+    '+':[[0,0,0],[0,1,0],[1,1,1],[0,1,0],[0,0,0]],
+    '-':[[0,0,0],[0,0,0],[1,1,1],[0,0,0],[0,0,0]],
+    'A':[[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+    'B':[[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,1,0]],
+    'C':[[1,1,1],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+    'D':[[1,1,0],[1,0,1],[1,0,1],[1,0,1],[1,1,0]],
+    'E':[[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+    'F':[[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,0,0]],
+    'G':[[1,1,1],[1,0,0],[1,0,1],[1,0,1],[1,1,1]],
+    'H':[[1,0,1],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+    'I':[[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+    'J':[[0,0,1],[0,0,1],[0,0,1],[1,0,1],[1,1,1]],
+    'K':[[1,0,1],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+    'L':[[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+    'M':[[1,0,1],[1,1,1],[1,0,1],[1,0,1],[1,0,1]],
+    'N':[[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+    'O':[[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+    'P':[[1,1,1],[1,0,1],[1,1,1],[1,0,0],[1,0,0]],
+    'Q':[[1,1,1],[1,0,1],[1,0,1],[1,1,1],[0,0,1]],
+    'R':[[1,1,1],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+    'S':[[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+    'T':[[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+    'U':[[1,0,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+    'V':[[1,0,1],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+    'W':[[1,0,1],[1,0,1],[1,0,1],[1,1,1],[1,0,1]],
+    'X':[[1,0,1],[1,0,1],[0,1,0],[1,0,1],[1,0,1]],
+    'Y':[[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+    'Z':[[1,1,1],[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+    ' ':[[0,0],[0,0],[0,0],[0,0],[0,0]],
+    '!':[[1],[1],[1],[0],[1]],
+    '?':[[1,1,1],[0,0,1],[0,1,1],[0,0,0],[0,1,0]],
+    '好':[[1,1,1,0,0,1,0],[1,0,1,0,1,1,0],[1,1,1,1,0,1,0],[0,0,1,0,1,0,0],[1,1,1,0,1,1,0]],
+    '坏':[[1,1,1,0,1,1,0],[1,0,1,0,0,1,0],[1,1,1,1,0,1,0],[0,0,1,0,0,1,0],[1,1,1,0,1,1,0]],
+  };
+
+  // Simple string rendering using fillText fallback with pixel approximation
+  ctx.fillStyle = color;
+  ctx.font = `${8 * sz}px monospace`;
+  ctx.fillText(str, x, y + 8 * sz);
+}
+
+// Draw pixel char at position
+function drawChar(ch, x, y, color, sz = 1) {
+  ctx.fillStyle = color;
+  const pattern = fontPatterns[ch] || fontPatterns[' '];
+  if (!pattern) return;
+  const patW = pattern[0].length;
+  const patH = pattern.length;
+  for (let py = 0; py < patH; py++) {
+    for (let px2 = 0; px2 < patW; px2++) {
+      if (pattern[py][px2]) {
+        ctx.fillRect(x + px2 * sz, y + py * sz, sz, sz);
+      }
+    }
+  }
+}
+
+// 像素字模 - 5x7大字模，更清晰
+const PIXEL_FONT = {
+  'A': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [1,1,1,1],
+    [1,0,0,1],
+    [1,0,0,1],
+  ],
+  'B': [
+    [1,1,1,0],
+    [1,0,0,1],
+    [1,1,1,0],
+    [1,0,0,1],
+    [1,1,1,0],
+  ],
+  'C': [
+    [0,1,1,1],
+    [1,0,0,0],
+    [1,0,0,0],
+    [1,0,0,0],
+    [0,1,1,1],
+  ],
+  'D': [
+    [1,1,1,0],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,1,1,0],
+  ],
+  'E': [
+    [1,1,1,1],
+    [1,0,0,0],
+    [1,1,1,0],
+    [1,0,0,0],
+    [1,1,1,1],
+  ],
+  'F': [
+    [1,1,1,1],
+    [1,0,0,0],
+    [1,1,1,0],
+    [1,0,0,0],
+    [1,0,0,0],
+  ],
+  'G': [
+    [0,1,1,1],
+    [1,0,0,0],
+    [1,0,1,1],
+    [1,0,0,1],
+    [0,1,1,1],
+  ],
+  'H': [
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,1,1,1],
+    [1,0,0,1],
+    [1,0,0,1],
+  ],
+  'I': [
+    [1,1,1],
+    [0,1,0],
+    [0,1,0],
+    [0,1,0],
+    [1,1,1],
+  ],
+  'J': [
+    [0,0,1,1],
+    [0,0,0,1],
+    [0,0,0,1],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  'K': [
+    [1,0,0,1],
+    [1,0,1,0],
+    [1,1,0,0],
+    [1,0,1,0],
+    [1,0,0,1],
+  ],
+  'L': [
+    [1,0,0,0],
+    [1,0,0,0],
+    [1,0,0,0],
+    [1,0,0,0],
+    [1,1,1,1],
+  ],
+  'M': [
+    [1,0,0,0,1],
+    [1,1,0,1,1],
+    [1,0,1,0,1],
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+  ],
+  'N': [
+    [1,0,0,1],
+    [1,1,0,1],
+    [1,0,1,1],
+    [1,0,0,1],
+    [1,0,0,1],
+  ],
+  'O': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  'P': [
+    [1,1,1,0],
+    [1,0,0,1],
+    [1,1,1,0],
+    [1,0,0,0],
+    [1,0,0,0],
+  ],
+  'Q': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,1,0],
+    [0,1,1,1],
+  ],
+  'R': [
+    [1,1,1,0],
+    [1,0,0,1],
+    [1,1,1,0],
+    [1,0,1,0],
+    [1,0,0,1],
+  ],
+  'S': [
+    [0,1,1,1],
+    [1,0,0,0],
+    [0,1,1,0],
+    [0,0,0,1],
+    [1,1,1,0],
+  ],
+  'T': [
+    [1,1,1,1,1],
+    [0,0,1,0,0],
+    [0,0,1,0,0],
+    [0,0,1,0,0],
+    [0,0,1,0,0],
+  ],
+  'U': [
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  'V': [
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [0,1,0,1,0],
+    [0,1,0,1,0],
+    [0,0,1,0,0],
+  ],
+  'W': [
+    [1,0,0,0,1],
+    [1,0,0,0,1],
+    [1,0,1,0,1],
+    [1,1,0,1,1],
+    [1,0,0,0,1],
+  ],
+  'X': [
+    [1,0,0,1],
+    [0,1,1,0],
+    [0,1,1,0],
+    [0,1,1,0],
+    [1,0,0,1],
+  ],
+  'Y': [
+    [1,0,0,0,1],
+    [0,1,0,1,0],
+    [0,0,1,0,0],
+    [0,0,1,0,0],
+    [0,0,1,0,0],
+  ],
+  'Z': [
+    [1,1,1,1],
+    [0,0,1,0],
+    [0,1,0,0],
+    [1,0,0,0],
+    [1,1,1,1],
+  ],
+  '0': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  '1': [
+    [0,1,0],
+    [1,1,0],
+    [0,1,0],
+    [0,1,0],
+    [1,1,1],
+  ],
+  '2': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [0,0,1,0],
+    [0,1,0,0],
+    [1,1,1,1],
+  ],
+  '3': [
+    [1,1,1,0],
+    [0,0,0,1],
+    [0,1,1,0],
+    [0,0,0,1],
+    [1,1,1,0],
+  ],
+  '4': [
+    [1,0,0,1],
+    [1,0,0,1],
+    [1,1,1,1],
+    [0,0,0,1],
+    [0,0,0,1],
+  ],
+  '5': [
+    [1,1,1,1],
+    [1,0,0,0],
+    [1,1,1,0],
+    [0,0,0,1],
+    [1,1,1,0],
+  ],
+  '6': [
+    [0,1,1,0],
+    [1,0,0,0],
+    [1,1,1,0],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  '7': [
+    [1,1,1,1],
+    [0,0,0,1],
+    [0,0,1,0],
+    [0,1,0,0],
+    [0,1,0,0],
+  ],
+  '8': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [0,1,1,0],
+    [1,0,0,1],
+    [0,1,1,0],
+  ],
+  '9': [
+    [0,1,1,0],
+    [1,0,0,1],
+    [0,1,1,1],
+    [0,0,0,1],
+    [0,1,1,0],
+  ],
+  ':': [[1],[1],[0],[1],[1]],
+  '%': [
+    [0,0,1,0,0],
+    [0,0,0,1,0],
+    [0,0,1,0,0],
+    [0,1,0,0,0],
+    [0,0,0,0,1],
+  ],
+  '/': [[0,0,0,1],[0,0,1,0],[0,1,0,0],[1,0,0,0],[0,0,0,0]],
+  '+': [[0,0,0],[1,1,1],[0,1,0],[1,1,1],[0,0,0]],
+  '-': [[0,0,0],[0,0,0],[1,1,1],[0,0,0],[0,0,0]],
+  '.': [[0],[0],[0],[0],[1]],
+  ',': [[0],[0],[0],[1],[1]],
+  '!': [[1],[1],[1],[0],[1]],
+  '?': [[0,1,1,0],[1,0,0,1],[0,0,1,0],[0,1,0,0],[0,1,0,0]],
+  '(': [[0,1],[1,0],[1,0],[1,0],[0,1]],
+  ')': [[1,0],[0,1],[0,1],[0,1],[1,0]],
+  '[': [[1,1],[1,0],[1,0],[1,0],[1,1]],
+  ']': [[1,1],[0,1],[0,1],[0,1],[1,1]],
+};
+
+function drawText(text, x, y, color, scale = 1) {
+  // 强制使用整数坐标避免亚像素模糊
+  let cx = Math.floor(x);
+  const iy = Math.floor(y);
+  const hasCJK = /[^\x00-\x7E]/.test(text);
+
+  if (hasCJK) {
+    // CJK文字
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = color;
+    const fontSize = Math.max(14, Math.floor(14 * scale));
+    ctx.font = `bold ${fontSize}px "Courier New", Courier, monospace`;
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, cx, iy);
+    return;
+  }
+
+  // 像素字模渲染 - 5x7字模更清晰
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i].toUpperCase();
+    const pat = PIXEL_FONT[ch];
+    if (pat) {
+      const pw = pat[0].length;
+      const ph = pat.length;
+      // 像素大小 = scale * 2（放大2倍）
+      const ps = Math.max(2, Math.floor(scale * 2));
+      for (let py = 0; py < ph; py++) {
+        for (let px2 = 0; px2 < pw; px2++) {
+          if (pat[py][px2]) {
+            ctx.fillStyle = color;
+            ctx.fillRect(cx + px2 * ps, iy + py * ps, ps, ps);
+          }
+        }
+      }
+      cx += (pw + 1) * ps;
+    } else {
+      cx += 6 * scale;
+    }
+  }
+}
+
+// ─── Draw functions ──────────────────────────────────────────────
+function drawBg() {
+  const isDay = g.isDay;
+  const t = Date.now();
+
+  // ─── Sky gradient ───────────────────────────────────────
+  // 天空从上到下渐变，更有深度感
+  if (isDay) {
+    // 白天：从深蓝到浅蓝到橙黄地平线
+    ctx.fillStyle = '#4A90D9';
+    ctx.fillRect(0, 0, 720, 120);
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(0, 120, 720, 100);
+    ctx.fillStyle = '#B8E0F0';
+    ctx.fillRect(0, 220, 720, 80);
+    ctx.fillStyle = '#FFEFD5';
+    ctx.fillRect(0, 300, 720, 60);
+    // 地平线微光
+    ctx.fillStyle = 'rgba(255,200,100,0.15)';
+    ctx.fillRect(0, 340, 720, 30);
+  } else {
+    // 夜晚：从深紫到深蓝
+    ctx.fillStyle = '#050a1a';
+    ctx.fillRect(0, 0, 720, 120);
+    ctx.fillStyle = '#0d1530';
+    ctx.fillRect(0, 120, 720, 100);
+    ctx.fillStyle = '#101d40';
+    ctx.fillRect(0, 220, 720, 100);
+    ctx.fillStyle = '#0a1228';
+    ctx.fillRect(0, 320, 720, 80);
+  }
+
+  // ─── Background mountains ───────────────────────────────
+  // 远山 - 最淡的
+  ctx.fillStyle = isDay ? '#6B8E6B' : '#1a2040';
+  // 山峰1
+  ctx.beginPath();
+  ctx.moveTo(0, 360);
+  ctx.lineTo(80, 220);
+  ctx.lineTo(160, 280);
+  ctx.lineTo(240, 200);
+  ctx.lineTo(320, 260);
+  ctx.lineTo(400, 180);
+  ctx.lineTo(480, 240);
+  ctx.lineTo(560, 200);
+  ctx.lineTo(640, 260);
+  ctx.lineTo(720, 220);
+  ctx.lineTo(720, 360);
+  ctx.closePath();
+  ctx.fill();
+
+  // 中山 - 中间色
+  ctx.fillStyle = isDay ? '#4A7040' : '#151d35';
+  ctx.beginPath();
+  ctx.moveTo(0, 380);
+  ctx.lineTo(60, 280);
+  ctx.lineTo(140, 320);
+  ctx.lineTo(220, 260);
+  ctx.lineTo(300, 310);
+  ctx.lineTo(380, 240);
+  ctx.lineTo(460, 300);
+  ctx.lineTo(540, 250);
+  ctx.lineTo(620, 300);
+  ctx.lineTo(720, 260);
+  ctx.lineTo(720, 380);
+  ctx.closePath();
+  ctx.fill();
+
+  // 近山/丘陵 - 最深的
+  ctx.fillStyle = isDay ? '#2D5A27' : '#0f1528';
+  ctx.beginPath();
+  ctx.moveTo(0, 396);
+  ctx.lineTo(50, 330);
+  ctx.lineTo(120, 360);
+  ctx.lineTo(200, 310);
+  ctx.lineTo(280, 350);
+  ctx.lineTo(360, 300);
+  ctx.lineTo(440, 340);
+  ctx.lineTo(520, 305);
+  ctx.lineTo(600, 345);
+  ctx.lineTo(680, 315);
+  ctx.lineTo(720, 330);
+  ctx.lineTo(720, 396);
+  ctx.closePath();
+  ctx.fill();
+
+  // ─── Ground base ───────────────────────────────────────
+  ctx.fillStyle = isDay ? '#228B22' : '#0d1a10';
+  ctx.fillRect(0, 396, 720, 10);
+
+  // 地面过渡
+  ctx.fillStyle = isDay ? '#1a6b1a' : '#091208';
+  ctx.fillRect(0, 406, 720, 10);
+
+  // 泥土层
+  ctx.fillStyle = isDay ? '#3d2817' : '#1a1008';
+  ctx.fillRect(0, 416, 720, 10);
+
+  // ─── Foreground grass tufts ───────────────────────────
+  ctx.fillStyle = isDay ? '#32CD32' : '#1a3d1a';
+  for (let i = 0; i < 30; i++) {
+    const gx = i * 25 + (i % 3) * 8;
+    const gy = 396;
+    // 草叶
+    ctx.fillRect(gx, gy - 8, 2, 8);
+    ctx.fillRect(gx + 4, gy - 6, 2, 6);
+    ctx.fillRect(gx + 8, gy - 10, 2, 10);
+  }
+
+  // ─── Decorative elements ───────────────────────────────
+  // 左右两侧的树/灌木
+  if (isDay) {
+    // 左边的树
+    ctx.fillStyle = '#1a4d1a'; // 树干
+    ctx.fillRect(20, 350, 12, 50);
+    ctx.fillStyle = '#228B22'; // 树冠
+    ctx.fillRect(8, 310, 36, 40);
+    ctx.fillRect(14, 295, 24, 20);
+    ctx.fillStyle = '#32CD32';
+    ctx.fillRect(16, 298, 20, 14);
+
+    // 右边的灌木丛
+    ctx.fillStyle = '#1a5a1a';
+    ctx.fillRect(680, 370, 30, 30);
+    ctx.fillRect(670, 375, 20, 25);
+    ctx.fillRect(695, 372, 18, 28);
+    ctx.fillStyle = '#228B22';
+    ctx.fillRect(682, 365, 26, 18);
+    ctx.fillRect(673, 370, 14, 15);
+    ctx.fillRect(692, 368, 14, 15);
+  }
+
+  // ─── Small flowers (day only) ──────────────────────────
+  if (isDay) {
+    const flowerColors = ['#FFB6C1', '#FFA500', '#FF69B4', '#FFFFFF', '#87CEEB'];
+    const flowerPositions = [
+      [50, 394], [95, 393], [150, 395], [210, 394], [280, 393],
+      [340, 395], [410, 394], [470, 393], [530, 395], [590, 394],
+      [650, 393], [700, 394]
+    ];
+    flowerPositions.forEach(([fx, fy], i) => {
+      const fc = flowerColors[i % flowerColors.length];
+      ctx.fillStyle = '#FFFF44'; // 花心
+      ctx.fillRect(fx, fy - 3, 2, 2);
+      ctx.fillStyle = fc;
+      ctx.fillRect(fx - 2, fy - 5, 2, 2);
+      ctx.fillRect(fx + 2, fy - 5, 2, 2);
+      ctx.fillRect(fx - 2, fy - 2, 2, 2);
+      ctx.fillRect(fx + 2, fy - 2, 2, 2);
+    });
+
+    // 地面小石子
+    ctx.fillStyle = '#888';
+    [[80, 400], [180, 401], [330, 400], [480, 401], [630, 400]].forEach(([sx, sy]) => {
+      ctx.fillRect(sx, sy, 3, 2);
+    });
+  }
+
+  // ─── Fence posts (day only, sides) ───────────────────
+  if (isDay) {
+    ctx.fillStyle = '#8B6914';
+    [0, 80, 640, 710].forEach(fx => {
+      ctx.fillRect(fx, 370, 6, 30);
+      ctx.fillRect(fx - 2, 368, 10, 4);
+    });
+  }
+}
+
+function drawSunMoon() {
+  const t = Date.now();
+  if (g.isDay) {
+    // Sun - larger and more prominent
+    const sx = 640, sy = 60, sr = 24;
+
+    // Sun glow (outer)
+    ctx.fillStyle = 'rgba(255,200,80,0.15)';
+    ctx.fillRect(sx - 40, sy - 40, 80, 80);
+    ctx.fillStyle = 'rgba(255,180,60,0.2)';
+    ctx.fillRect(sx - 30, sy - 30, 60, 60);
+
+    // Sun body
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
+    ctx.fillStyle = '#FFFACD';
+    ctx.fillRect(sx - sr + 4, sy - sr + 4, sr * 2 - 8, sr * 2 - 8);
+
+    // Rays
+    ctx.fillStyle = '#FFD700';
+    const rayLen = 14;
+    const rayW = 4;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2 + t / 3000;
+      const rx = Math.cos(angle) * (sr + 6);
+      const ry = Math.sin(angle) * (sr + 6);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(angle);
+      ctx.fillRect(rayW / 2, -(sr + rayLen), rayW, rayLen);
+      ctx.restore();
+    }
+
+    // Animated clouds drifting
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    const cloudData = [
+      [80, 90, 60, 1],
+      [220, 70, 80, 1.2],
+      [400, 100, 50, 0.8],
+      [560, 80, 70, 1.1],
+    ];
+    cloudData.forEach(([cx, cy, cw, speed]) => {
+      const offset = ((t / 10000 * speed) % 1) * 800 - 100;
+      const px = (cx + offset) % 800 - 80;
+      // Cloud puffs
+      ctx.fillRect(px, cy, cw, 14);
+      ctx.fillRect(px - 8, cy + 4, 16, 10);
+      ctx.fillRect(px + cw - 10, cy + 3, 12, 10);
+      ctx.fillRect(px + cw / 2 - 6, cy - 4, 20, 10);
+    });
+
+  } else {
+    // Moon - with crater details
+    const mx = 640, my = 55;
+
+    // Moon glow
+    ctx.fillStyle = 'rgba(200,220,255,0.1)';
+    ctx.fillRect(mx - 40, my - 40, 80, 80);
+
+    // Moon body
+    ctx.fillStyle = '#E8E8D0';
+    ctx.fillRect(mx - 22, my - 22, 44, 44);
+    ctx.fillStyle = '#D4D4B8';
+    ctx.fillRect(mx - 18, my - 18, 36, 36);
+
+    // Craters
+    ctx.fillStyle = '#C4C4A8';
+    ctx.fillRect(mx - 10, my - 8, 8, 8);
+    ctx.fillRect(mx + 4, my + 2, 10, 10);
+    ctx.fillRect(mx - 6, my + 8, 6, 6);
+    ctx.fillStyle = '#E0E0C8';
+    ctx.fillRect(mx - 8, my - 6, 4, 4);
+    ctx.fillRect(mx + 6, my + 4, 5, 5);
+
+    // Stars - many more, with twinkle
+    ctx.fillStyle = P.star;
+    const starPositions = [
+      [30, 20], [100, 45], [170, 15], [230, 55], [290, 30],
+      [350, 50], [410, 20], [480, 40], [540, 25], [600, 55],
+      [50, 80], [130, 100], [190, 75], [260, 95], [320, 70],
+      [380, 90], [440, 80], [500, 60], [560, 100], [620, 85],
+      [80, 130], [150, 150], [210, 120], [270, 140], [330, 115],
+      [390, 145], [450, 125], [510, 135], [570, 150], [95, 175],
+      [175, 195], [255, 170], [335, 185], [415, 160], [495, 180],
+      [15, 55], [65, 115], [125, 165], [185, 35], [245, 85],
+      [305, 135], [365, 55], [425, 105], [485, 155], [545, 95]
+    ];
+    starPositions.forEach(([sx, sy], i) => {
+      const flicker = Math.sin(t / 400 + i * 1.3) > 0.3 ? 1 : 0.3;
+      const size = (i % 3 === 0) ? 3 : 2;
+      ctx.globalAlpha = flicker;
+      ctx.fillStyle = i % 5 === 0 ? '#aaccff' : P.star;
+      ctx.fillRect(sx, sy, size, size);
+    });
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawIncubator() {
+  // 居中显示在游戏区下方
+  const bx = 234, by = 290, bw = 252, bh = 100;
+
+  // Base body
+  ctx.fillStyle = P.incBase;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = P.incLight;
+  ctx.fillRect(bx + 6, by + 6, bw - 12, 16);
+
+  // Bowl/ring
+  ctx.fillStyle = '#660000';
+  ctx.fillRect(bx + 12, by + 22, bw - 24, 10);
+  ctx.fillStyle = P.incLight;
+  ctx.fillRect(bx + 18, by + 24, bw - 36, 5);
+
+  // Heat flame
+  if (g.heatOn && g.power > 0) {
+    const t = Date.now() / 150;
+    const flameY = by + bh - 16;
+    ctx.fillStyle = P.flame[0];
+    ctx.fillRect(bx + 60 + Math.sin(t) * 6, flameY - 12, 10, 16);
+    ctx.fillRect(bx + 84 + Math.sin(t * 1.3) * 6, flameY - 16, 10, 22);
+    ctx.fillRect(bx + 108 + Math.sin(t * 0.8) * 6, flameY - 8, 10, 12);
+    ctx.fillStyle = P.flame[2];
+    ctx.fillRect(bx + 66 + Math.sin(t) * 6, flameY - 8, 5, 7);
+    ctx.fillRect(bx + 90 + Math.sin(t * 1.3) * 6, flameY - 12, 5, 10);
+  } else {
+    // Off state - cold embers
+    ctx.fillStyle = '#444';
+    ctx.fillRect(bx + 66, by + bh - 12, 6, 5);
+    ctx.fillRect(bx + 90, by + bh - 14, 6, 7);
+  }
+
+  // Ice bag (when ice is on) - 放在孵化器左侧
+  if (g.iceOn) {
+    const iceX = bx - 56;
+    const iceY = by + 10;
+    // Ice bag body
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(iceX, iceY, 40, 50);
+    ctx.fillStyle = '#ADD8E6';
+    ctx.fillRect(iceX + 3, iceY + 3, 12, 16);
+    // Ice crystals
+    ctx.fillStyle = '#E0FFFF';
+    ctx.fillRect(iceX + 20, iceY + 20, 10, 10);
+    ctx.fillRect(iceX + 6, iceY + 36, 12, 12);
+    // Frost effect
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(iceX + 6, iceY + 6, 6, 6);
+    ctx.fillRect(iceX + 28, iceY + 12, 6, 6);
+  }
+
+  // Incubator label
+  drawText('INCUBATOR', bx + 66, by + bh - 16, '#888', 1);
+}
+
+function drawEgg() {
+  // 蛋位置：在孵化器上方居中
+  const ex = 360, ey = 230;
+  const eggW = 60, eggH = 82; // 更真实的宽高比（约0.73）
+
+  if (g.hatchPct >= 100 || g.isHatching) {
+    // Hatching animation
+    drawHatchingAnim();
+    return;
+  }
+
+  // Show waiting state if not yet day for next hatch
+  if (g.dayCount < g.nextHatchDay) {
+    const daysLeft = g.nextHatchDay - g.dayCount;
+    ctx.globalAlpha = 0.5;
+
+    // Egg body - 真正的椭圆蛋形
+    for (let py = -eggH / 2; py < eggH / 2; py++) {
+      const prog = py / (eggH / 2);
+      // 上半部分稍窄，下半部分圆润
+      let w;
+      if (py < 0) {
+        // 上半部分：较窄的椭圆
+        w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85));
+      } else {
+        // 下半部分：更圆润的椭圆
+        w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
+      }
+      // 颜色渐变：顶部浅，底部深
+      let col;
+      if (py < -eggH / 4) {
+        col = '#f8f0e0'; // 顶部最浅
+      } else if (py < 0) {
+        col = '#f5e6c8'; // 上部
+      } else if (py < eggH / 4) {
+        col = '#eed8a8'; // 中下部
+      } else {
+        col = '#e8d098'; // 底部
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(ex - w, ey + py, w * 2, 1);
+    }
+
+    ctx.globalAlpha = 1;
+    // Show waiting text
+    drawText(`等待第${g.nextHatchDay}天`, ex - 75, ey + eggH / 2 + 15, P.warn, 2);
+    drawText(`(${daysLeft}天后)`, ex - 64, ey + eggH / 2 + 35, P.dim, 2);
+    return;
+  }
+
+  // Crack stage
+  const stage = Math.floor(g.hatchPct / 20);
+
+  // Egg body - 真正的椭圆蛋形
+  for (let py = -eggH / 2; py < eggH / 2; py++) {
+    const prog = py / (eggH / 2);
+    let w;
+    if (py < 0) {
+      w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85));
+    } else {
+      w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
+    }
+    let col;
+    if (py < -eggH / 4) {
+      col = '#f8f0e0';
+    } else if (py < 0) {
+      col = '#f5e6c8';
+    } else if (py < eggH / 4) {
+      col = '#eed8a8';
+    } else {
+      col = '#e8d098';
+    }
+    ctx.fillStyle = col;
+    ctx.fillRect(ex - w, ey + py, w * 2, 1);
+  }
+
+  // 斑点装饰
+  ctx.fillStyle = 'rgba(180, 140, 80, 0.35)';
+  const spots = [[-15, -25], [10, -15], [-5, 5], [18, -5], [-20, 10], [12, 20]];
+  spots.forEach(([dx, dy]) => {
+    const spotW = 5 + Math.abs(dx) % 3;
+    ctx.fillRect(ex + dx - spotW / 2, ey + dy - spotW / 2, spotW, spotW);
+  });
+
+  // 高光
+  ctx.fillStyle = 'rgba(255, 255, 240, 0.6)';
+  ctx.fillRect(ex - 12, ey - eggH / 2 + 12, 6, 10);
+
+  // 阴影（底部）
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+  ctx.fillRect(ex - eggW / 2 + 5, ey + eggH / 2 - 6, eggW - 10, 4);
+
+  // Crack lines based on stage
+  if (stage >= 1) {
+    ctx.fillStyle = P.eggCrack;
+    ctx.fillRect(ex - 8, ey - 18, 6, 8);
+    ctx.fillRect(ex + 2, ey - 12, 8, 6);
+  }
+  if (stage >= 2) {
+    ctx.fillRect(ex - 18, ey, 10, 6);
+    ctx.fillRect(ex + 8, ey + 6, 8, 8);
+    ctx.fillRect(ex - 6, ey + 14, 6, 6);
+  }
+  if (stage >= 3) {
+    ctx.fillRect(ex - 24, ey - 6, 8, 6);
+    ctx.fillRect(ex + 14, ey - 10, 6, 12);
+    ctx.fillRect(ex - 12, ey + 20, 12, 6);
+    ctx.fillRect(ex + 2, ey - 24, 8, 6);
+  }
+  if (stage >= 4) {
+    // Major cracks
+    ctx.fillStyle = P.eggInt;
+    ctx.fillRect(ex - 14, ey - 10, 28, 32);
+    ctx.fillStyle = P.eggCrack;
+    for (let i = 0; i < 6; i++) {
+      const cx = ex - 24 + Math.floor(Math.random() * 48);
+      const cy = ey - 24 + Math.floor(Math.random() * 54);
+      ctx.fillRect(cx, cy, 6, 6);
+    }
+    // Shadow inside
+    ctx.fillStyle = '#D4A574';
+    ctx.fillRect(ex - 8, ey - 6, 16, 24);
+    // Eye peek
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ex - 3, ey, 6, 6);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(ex, ey, 2, 2);
+  }
+}
+
+let wobble = 0;
+
+// 在场景中绘制宠物
+function drawPet() {
+  if (!g.currentPet) return;
+
+  // Pet position - 居中显示在孵化器上方
+  const px = 360, py = 230;
+  const scale = 2.5; // 48px * 2.5 = 120px
+
+  // Create a temporary canvas for the pet sprite
+  const petCanvas = document.createElement('canvas');
+  petCanvas.width = 48;
+  petCanvas.height = 48;
+  drawPetSprite(petCanvas, g.currentPet, g.lastTs / 1000);
+
+  // Draw scaled pet to main canvas
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(petCanvas, px - 24 * scale, py - 24 * scale, 48 * scale, 48 * scale);
+  ctx.restore();
+
+  const pet = g.currentPet;
+
+  // Draw pet name and star rating above
+  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
+  drawText(pet.name, px - 40, py - 120, P.txt, 2);
+  drawText(starStr, px - 40, py - 96, STAR_COLORS[pet.star], 1);
+
+  // Gene icons
+  const geneStr = pet.genes.map(gk => GENES[gk].icon).join('');
+  if (geneStr) drawText(geneStr, px + 50, py - 112, P.dim, 1);
+
+  // Level badge
+  drawText(`Lv${pet.level}`, px + 50, py - 96, '#aaa', 1);
+
+  // Hunger warning (top right of pet)
+  if (g.hunger < 30) {
+    drawText('饿了!', px + 90, py - 100, P.danger, 2);
+  }
+
+  // Days remaining indicator
+  if (pet.expireDay) {
+    const daysLeft = pet.expireDay - g.dayCount;
+    const daysColor = daysLeft <= 3 ? P.danger : (daysLeft <= 5 ? P.warn : P.dim);
+    drawText(`剩${daysLeft}天`, px - 35, py + 130, daysColor, 2);
+  }
+
+  // Exp bar below pet
+  const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
+  const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
+  const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
+  const barW = 80;
+  ctx.fillStyle = P.barBg;
+  ctx.fillRect(px - barW / 2, py + 140, barW, 6);
+  ctx.fillStyle = '#90EE90';
+  ctx.fillRect(px - barW / 2, py + 140, Math.floor(barW * expProg), 6);
+}
+
+// 绘制所有已孵化宠物列表
+let petListRegions = []; // 存储底部宠物列表的点击区域
+
+function drawPetsList() {
+  if (g.pets.length === 0) return;
+
+  const startX = 16, startY = 456;
+  const petW = 64, petH = 64, gap = 8;
+  petListRegions = [];
+
+  // 背景
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, startY - 4, 720, petH + 8);
+
+  // 标题
+  drawText('宠物', 8, startY + 12, P.dim, 1);
+
+  // 最多显示8只宠物
+  const maxShow = Math.min(g.pets.length, 8);
+  for (let i = 0; i < maxShow; i++) {
+    const pet = g.pets[i];
+    const px = startX + 72 + i * (petW + gap);
+
+    // 记录点击区域
+    petListRegions.push({ x: px, y: startY, w: petW, h: petH, idx: i });
+
+    // 高亮当前宠物
+    if (pet === g.currentPet) {
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(px - 2, startY - 2, petW + 4, petH + 4);
+    }
+
+    // 创建临时canvas绘制宠物
+    const petCanvas = document.createElement('canvas');
+    petCanvas.width = 48;
+    petCanvas.height = 48;
+    drawPetSprite(petCanvas, pet);
+
+    // 绘制缩小的宠物
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(petCanvas, px, startY, petW, petH);
+    ctx.restore();
+
+    // 星级（头像右上角叠加显示）
+    const starStr = '★'.repeat(pet.star);
+    drawText(starStr, px + petW - 28, startY + petH - 14, STAR_COLORS[pet.star], 1);
+  }
+}
+
+function drawHatchingAnim() {
+  // 居中显示孵化动画
+  const t = Date.now() / 200;
+  const cx = 360, cy = 300;
+
+  // Egg pieces falling
+  ctx.fillStyle = P.eggLight;
+  for (let i = 0; i < 6; i++) {
+    const px = cx - 60 + i * 24 + Math.sin(t + i) * 12;
+    const py = cy - 40 + (i % 3) * 20 + Math.floor(t + i) % 20;
+    ctx.fillRect(Math.floor(px), Math.floor(py), 16, 16);
+  }
+
+  // Glowing center
+  const glow = (Math.sin(t * 2) + 1) * 0.5;
+  ctx.fillStyle = `rgba(255, 200, 100, ${glow * 0.8})`;
+  ctx.fillRect(cx - 40, cy - 40, 80, 80);
+
+  // Baby peek
+  if (g.hatchAnim > 10) {
+    const peek = Math.min(1, (g.hatchAnim - 10) / 20);
+    ctx.fillStyle = '#FFE4B5';
+    ctx.fillRect(cx - 30 * peek, cy - 30 * peek, 60 * peek, 60 * peek);
+    // Eyes
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx - 18, cy - 10, 10, 10);
+    ctx.fillRect(cx + 8, cy - 10, 10, 10);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx - 16, cy - 8, 4, 4);
+    ctx.fillRect(cx + 10, cy - 8, 4, 4);
+  }
+}
+
+function drawHUD() {
+  // Force crisp text rendering
+  ctx.imageSmoothingEnabled = false;
+  // Top bar background - 两行布局，充分利用720宽度
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, 720, 80);
+
+  // ========== 第一行：昼夜+时间 | 孵化进度条 | 温度 | 电量 ==========
+  const Y1 = 8;  // 第一行
+
+  // 昼夜图标 + 时间 (x: 0-70)
+  if (g.isDay) {
+    ctx.fillStyle = P.sun;
+    ctx.fillRect(8, Y1, 20, 20);
+    ctx.fillRect(4, Y1 + 4, 4, 4);
+    ctx.fillRect(28, Y1 + 4, 4, 4);
+    ctx.fillRect(12, Y1, 4, 4);
+    ctx.fillRect(12, Y1 + 20, 4, 4);
+  } else {
+    ctx.fillStyle = P.moon;
+    ctx.fillRect(8, Y1, 20, 20);
+    ctx.fillStyle = P.skyNgt;
+    ctx.fillRect(14, Y1 + 6, 10, 10);
+  }
+  const rem = g.isDay ? DAY_SEC - g.time : NGT_SEC - (g.time - DAY_SEC);
+  drawText(`${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, 36, Y1, P.txt, 1);
+
+  // 孵化进度 (x: 80-280，200宽进度条)
+  drawText('孵化', 80, Y1, P.txt, 1);
+  ctx.fillStyle = P.barBg;
+  ctx.fillRect(80, Y1 + 16, 140, 10);
+  ctx.fillStyle = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
+  ctx.fillRect(80, Y1 + 16, Math.floor(140 * g.hatchPct / 100), 10);
+  drawText(`${Math.floor(g.hatchPct)}%`, 226, Y1, P.txt, 1);
+
+  // 温度 (x: 300-400)
+  const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
+  const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
+  drawText('温度', 300, Y1, P.dim, 1);
+  drawText(`${g.temp.toFixed(1)}°`, 300, Y1 + 16, tempColor, 1);
+
+  // 电量 (x: 400-500)
+  const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
+  drawText('电量', 400, Y1, P.dim, 1);
+  drawText(`${Math.floor(g.power)}`, 400, Y1 + 16, pColor, 1);
+
+  // ========== 第二行：天数 | 亲密度 | 饥饿度 ==========
+  const Y2 = 40;
+  const BAR_Y = Y2 + 16;
+  const BAR_H = 10;
+
+  // 天数 (x: 0-80)
+  drawText(`第${g.dayCount}天`, 8, Y2, P.dim, 1);
+
+  // 亲密度 (x: 100-220)
+  drawText('亲密', 100, Y2, P.dim, 1);
+  const hearts = g.currentPet ? Math.floor(g.intimacy / 20) : 0;
+  ctx.fillStyle = P.heart;
+  for (let i = 0; i < hearts; i++) {
+    ctx.fillRect(100 + i * 18, BAR_Y, 10, 10);
+    ctx.fillRect(98 + i * 18, BAR_Y + 2, 14, 8);
+    ctx.fillRect(100 + i * 18, BAR_Y + 10, 10, 4);
+  }
+
+  // 饥饿度 (x: 250-400)
+  if (g.currentPet) {
+    const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
+    drawText('饥饿', 250, Y2, P.dim, 1);
+    ctx.fillStyle = P.barBg;
+    ctx.fillRect(300, BAR_Y, 100, BAR_H);
+    ctx.fillStyle = hungerColor;
+    ctx.fillRect(300, BAR_Y, Math.floor(100 * g.hunger / 100), BAR_H);
+    drawText(`${Math.floor(g.hunger)}`, 406, Y2, hungerColor, 1);
+  }
+}
+
+function drawFeedInventory() {
+  ctx.imageSmoothingEnabled = false;
+  // Bottom bar - 720宽度，y从512到576
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 520, 720, 56);
+
+  // 道具图标
+  drawText('道具', 8, 530, P.dim, 1);
+  drawText(`虫${g.inventory.worm}`, 76, 530, g.inventory.worm > 0 ? P.txt : P.dim, 1);
+  drawText(`果${g.inventory.fruit}`, 144, 530, g.inventory.fruit > 0 ? P.txt : P.dim, 1);
+  drawText(`饲${g.inventory.treat}`, 212, 530, g.inventory.treat > 0 ? P.heart : P.dim, 1);
+
+  // Heat/Ice status (右侧)
+  const heatStr = g.heatOn ? (g.power > 0 ? '加热中' : '无电量') : (g.iceOn ? '冰敷中' : '加热关');
+  const hColor = g.heatOn ? (g.power > 0 ? P.danger : P.dim) : (g.iceOn ? '#00BFFF' : P.dim);
+  drawText(heatStr, 600, 530, hColor, 1);
+}
+
+// ─── Pet Exp / Level System ─────────────────────────────────────
+function addExp(pet, amount) {
+  if (!pet) return;
+  pet.exp += amount;
+  // 检查升级
+  while (pet.level < 10 && pet.exp >= EXP_TABLE[pet.level]) {
+    pet.level++;
+    initAudio();
+    playSound('levelUp');
+    showToast(`🎉 ${pet.name} 升级了！Lv.${pet.level}`);
+  }
+}
+
+// ─── Synthesis System ────────────────────────────────────────────
+let synthSelect = []; // 当前选中的用于合成的宠物
+
+function doSynthesize() {
+  if (g.pets.length < 3) {
+    showToast('需要至少3只宠物才能合成');
+    return;
+  }
+  synthSelect = [];
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  // 按星级分组显示提示
+  const starGroups = {};
+  g.pets.forEach((p, i) => {
+    if (!starGroups[p.star]) starGroups[p.star] = [];
+    starGroups[p.star].push(i);
+  });
+  const starHint = Object.keys(starGroups)
+    .filter(s => starGroups[s].length >= 3)
+    .map(s => `${s}星(${starGroups[s].length}只)`).join('、') || '无3只同星';
+
+  const listHtml = g.pets.map((p, i) => {
+    const starStr = '★'.repeat(p.star) + '☆'.repeat(5 - p.star);
+    const geneStr = p.genes.map(gk => GENES[gk].icon).join('');
+    return `<div class="breed-pet-item" id="breed_item_${i}" onclick="toggleSynthSelect(${i})" style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #333;cursor:pointer">
+      <canvas id="breed_canvas_${i}" width="48" height="48" style="image-rendering:pixelated"></canvas>
+      <div>
+        <div style="color:${STAR_COLORS[p.star]}">${p.name} ${starStr}</div>
+        <div style="color:#aaa;font-size:11px">F${p.generation} · ${geneStr} · Lv.${p.level}</div>
+      </div>
+      <div id="breed_check_${i}" style="margin-left:auto;color:#444;font-size:20px">○</div>
+    </div>`;
+  }).join('');
+  msg.innerHTML = `<div class="title">⚗️ 宠物合成</div>
+    <div style="color:#aaa;font-size:12px;margin-bottom:4px">选择3只<b style="color:#FFD700">同星级</b>宠物合成1只<b style="color:#FFD700">+1星</b>宠物</div>
+    <div style="color:#666;font-size:11px;margin-bottom:8px">可选：${starHint} &nbsp; <span style="color:#f55">副宠物将被消耗</span></div>
+    <div id="breed_list" style="max-height:300px;overflow-y:auto">${listHtml}</div>
+    <div id="breed_error" style="color:#f55;font-size:12px;margin-top:6px;display:none">请选择3只同星级的宠物</div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="confirmSynth()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">合成</button>
+      <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">取消</button>
+    </div>`;
+  overlay.classList.add('show');
+  g.pets.forEach((p, i) => {
+    setTimeout(() => {
+      const c = document.getElementById(`breed_canvas_${i}`);
+      if (c) drawPetSprite(c, p);
+    }, 30);
+  });
+}
+
+function toggleSynthSelect(idx) {
+  const alreadyIdx = synthSelect.indexOf(idx);
+  if (alreadyIdx >= 0) {
+    synthSelect.splice(alreadyIdx, 1);
+  } else if (synthSelect.length < 3) {
+    synthSelect.push(idx);
+  }
+  g.pets.forEach((_, i) => {
+    const el = document.getElementById(`breed_check_${i}`);
+    const item = document.getElementById(`breed_item_${i}`);
+    if (el) el.textContent = synthSelect.includes(i) ? '◉' : '○';
+    if (item) item.style.background = synthSelect.includes(i) ? '#2a2a4a' : 'transparent';
+  });
+  document.getElementById('breed_error').style.display = 'none';
+}
+
+function confirmSynth() {
+  if (synthSelect.length !== 3) {
+    document.getElementById('breed_error').style.display = 'block';
+    document.getElementById('breed_error').textContent = '请选择3只宠物';
+    return;
+  }
+  const [idxA, idxB, idxC] = synthSelect;
+  const petA = g.pets[idxA];
+  const petB = g.pets[idxB];
+  const petC = g.pets[idxC];
+  // 检查是否同星
+  if (petA.star !== petB.star || petB.star !== petC.star) {
+    document.getElementById('breed_error').style.display = 'block';
+    document.getElementById('breed_error').textContent = '必须选择3只同星级的宠物';
+    return;
+  }
+  // 检查是否五星满级
+  if (petA.star >= 5) {
+    document.getElementById('breed_error').style.display = 'block';
+    document.getElementById('breed_error').textContent = '五星宠物已达上限，无法继续合成';
+    return;
+  }
+  closeOverlay();
+  finalizeSynth(petA, idxA, petB, idxB, petC, idxC);
+}
+
+function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
+  initAudio();
+  // 升星
+  const newStar = petA.star + 1;
+
+  // 基因融合（来自三只宠物）+ 小概率变异
+  const allGenes = [...petA.genes, ...petB.genes, ...petC.genes];
+  const unique = [...new Set(allGenes)];
+  let childGenes = unique.slice(0, 2);
+  // 15%概率基因突变
+  if (Math.random() < 0.15 && childGenes.length < 2) {
+    const parentGeneSet = new Set(allGenes);
+    const allGeneKeys = Object.keys(GENES).filter(k => !parentGeneSet.has(k));
+    if (allGeneKeys.length > 0) {
+      const mutant = allGeneKeys[Math.floor(Math.random() * allGeneKeys.length)];
+      childGenes.push(mutant);
+    }
+  }
+
+  // 代系取最大
+  const childGen = Math.max(petA.generation, petB.generation, petC.generation) + 1;
+
+  // 名字沿用主宠物
+  const childName = petA.name + '·进化';
+
+  // 性格随机选一个
+  const allTraits = [...petA.traits, ...petB.traits, ...petC.traits];
+  const uniqueTraits = [...new Set(allTraits)];
+  const childTraits = uniqueTraits.slice(0, 2);
+  if (childTraits.length === 0) childTraits.push('普通');
+
+  // 副宠物 idx 降序排列（先删idx大的避免偏移）
+  const removeIdxs = [idxB, idxC, idxA].sort((a, b) => b - a);
+  removeIdxs.forEach(idx => g.pets.splice(idx, 1));
+
+  // 生成进化后宠物
+  const child = {
+    id: Date.now(),
+    name: childName,
+    traits: childTraits,
+    star: newStar,
+    level: 1,
+    exp: 0,
+    genes: childGenes,
+    generation: childGen,
+    father: petA.name,
+    mother: petB.name,
+    day: g.dayCount,
+    expireDay: g.dayCount + 10,
+    breedCount: 0,
+  };
+
+  g.pets.push(child);
+  g.currentPet = child;
+  g.currentScene = 'pets'; // 合成后自动切换到宠物间
+  g.hunger = 100;
+
+  const starStr = '★'.repeat(child.star) + '☆'.repeat(5 - child.star);
+  const geneStr = child.genes.map(gk => GENES[gk].icon).join('');
+  const geneNameStr = child.genes.map(gk => GENES[gk].name).join('');
+  const mutated = childGenes.length > 2 || (childGenes.length === 2 && ![...petA.genes, ...petB.genes, ...petC.genes].includes(childGenes[1]));
+  const mutText = mutated ? '<br><span style="color:#ff69b4;font-size:12px">✨ 发生基因突变！</span>' : '';
+  // 播放音效：突变播放特殊音效
+  if (mutated) {
+    playSound('synthMutation');
+  } else {
+    playSound('synth');
+  }
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  const canvasId = 'hatch_pet_sprite';
+  msg.innerHTML = `<div class="title">⚗️ ${childName} 进化成功！</div>
+    <div style="color:#aaa;font-size:12px;margin-bottom:4px">${petA.name} + ${petB.name} + ${petC.name}</div>
+    <canvas id="${canvasId}" width="64" height="64" style="image-rendering:pixelated;margin:6px auto;display:block;border:1px solid #444"></canvas>
+    <div style="color:${STAR_COLORS[child.star]};font-size:20px">${starStr}</div>
+    <div style="margin-top:4px">${geneStr} <span style="color:#aaa">${geneNameStr}</span></div>
+    <div style="color:#aaa">${childTraits.join('、')}</div>
+    <div style="color:#aaa;margin-top:6px">F${child.generation} · Lv.1</div>
+    ${mutText}`;
+  overlay.classList.add('show');
+  setTimeout(() => {
+    const c = document.getElementById(canvasId);
+    if (c) drawPetSprite(c, child);
+  }, 50);
+  saveGame();
+}
+
+// 放归宠物
+function releasePet(idx) {
+  const pet = g.pets[idx];
+  if (!pet) return;
+  showToast(`${pet.name} 回到了大自然...`);
+  g.pets.splice(idx, 1);
+  if (g.currentPet === pet) {
+    g.currentPet = g.pets.length > 0 ? g.pets[g.pets.length - 1] : null;
+  }
+  closeOverlay();
+  saveGame();
+}
+
+// 显示宠物详情（点击底部列表）
+function showPetDetail(idx) {
+  const pet = g.pets[idx];
+  if (!pet) return;
+  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
+  const geneStr = pet.genes.map(gk => `${GENES[gk].icon}${GENES[gk].name}`).join(' ');
+  const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
+  const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
+  const expProg = Math.floor(((pet.exp - expCur) / (expNext - expCur)) * 100);
+  const daysLeft = pet.expireDay - g.dayCount;
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  const canvasId = 'pet_detail_canvas';
+  msg.innerHTML = `<div class="title">${pet.name}</div>
+    <canvas id="${canvasId}" width="64" height="64" style="image-rendering:pixelated;margin:6px auto;display:block;border:1px solid #444"></canvas>
+    <div style="color:${STAR_COLORS[pet.star]};font-size:18px">${starStr}</div>
+    <div style="margin-top:4px;color:#aaa">${geneStr}</div>
+    <div style="margin-top:6px">
+      <span style="color:#aaa">Lv.${pet.level}</span>
+      <span style="color:#888;font-size:11px"> · F${pet.generation}</span>
+    </div>
+    <div style="margin-top:4px;font-size:11px;color:#666">经验 <span style="color:#aaa">${pet.exp}</span> / ${expNext}</div>
+    <div style="background:#333;height:6px;border-radius:3px;margin:4px 0">
+      <div style="background:#90EE90;height:6px;border-radius:3px;width:${expProg}%"></div>
+    </div>
+    <div style="color:#aaa;font-size:12px">${pet.traits.join('、')}</div>
+    <div style="margin-top:6px;font-size:11px;color:#666">
+      剩余 <span style="color:${daysLeft <= 3 ? '#f55' : '#aaa'}">${daysLeft}天</span> · 已繁殖${pet.breedCount}次
+    </div>
+    ${pet.father ? `<div style="font-size:11px;color:#666;margin-top:2px">父:${pet.father} 母:${pet.mother}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="releasePet(${idx})" style="flex:1;padding:8px;background:#3a1a1a;border:2px solid #f55;color:#f88;cursor:pointer">放归</button>
+      <button onclick="setCurrentPet(${idx})" style="flex:1;padding:8px;background:#1a2a1a;border:2px solid #5f5;color:#8f8;cursor:pointer">选中</button>
+      <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">关闭</button>
+    </div>`;
+  overlay.classList.add('show');
+  setTimeout(() => {
+    const c = document.getElementById(canvasId);
+    if (c) drawPetSprite(c, pet);
+  }, 30);
+}
+
+function setCurrentPet(idx) {
+  g.currentPet = g.pets[idx];
+  closeOverlay();
+  saveGame();
+}
+
+// ─── Game Logic ─────────────────────────────────────────────────
+function update(dt) {
+  // dt in seconds
+  g.time += dt;
+  if (g.time >= CYCLE) {
+    g.time = 0;
+    g.isDay = true;
+    g.dayCount++;
+  } else if (g.time >= DAY_SEC && g.isDay) {
+    g.isDay = false;
+  }
+
+  // Power regen (every 15 seconds)
+  g.powerRegenTimer += dt;
+  if (g.powerRegenTimer >= 15) {
+    g.powerRegenTimer = 0;
+    const regen = g.isDay ? Math.floor(POWER_DAY_REGEN / 2) : Math.floor(POWER_NGT_REGEN / 2);
+    g.power = Math.min(POWER_MAX, g.power + regen);
+  }
+
+  // Pet expiration check (宠物每10天消失)
+  if (g.currentPet && g.dayCount > g.currentPet.expireDay) {
+    initAudio();
+    playSound('petLeave');
+    // 宠物消失
+    const petName = g.currentPet.name;
+    g.pets = g.pets.filter(p => p !== g.currentPet);
+    g.currentPet = g.pets.length > 0 ? g.pets[g.pets.length - 1] : null;
+    showToast(`${petName}离开了...`);
+    saveGame();
+  }
+
+  // Cooldowns
+  if (g.petCdLeft > 0) g.petCdLeft = Math.max(0, g.petCdLeft - dt);
+  if (g.feedCdLeft > 0) g.feedCdLeft = Math.max(0, g.feedCdLeft - dt);
+  if (g.forageCdLeft > 0) g.forageCdLeft = Math.max(0, g.forageCdLeft - dt);
+
+  // Heat & Ice
+  if (g.heatOn && g.power > 0) {
+    g.temp = Math.min(TEMP_MAX, g.temp + 0.3 * dt);
+    g.power = Math.max(0, g.power - HEAT_DRAIN * dt);
+    if (g.power <= 0) {
+      initAudio();
+      playSound('warning');
+      g.heatOn = false;
+    }
+  } else if (g.iceOn) {
+    // 冰袋降温：每秒降3度
+    g.temp = Math.max(TEMP_MIN, g.temp - 3 * dt);
+  } else {
+    // Natural cooling - faster at night
+    const coolRate = g.isDay ? 0.15 : 0.25;
+    g.temp = Math.max(TEMP_MIN, g.temp - coolRate * dt);
+  }
+
+  // 温度极端警告
+  if (g.temp >= TEMP_MAX || g.temp <= TEMP_MIN) {
+    initAudio();
+    playSound('warning');
+  }
+
+  // Hatch rate
+  let rate = HATCH_RATE;
+  if (g.temp < TEMP_OPT_MIN) {
+    rate = HATCH_RATE_COLD;
+    if (g.temp < 30) {
+      g.intimacy = Math.max(0, g.intimacy - 0.05 * dt);
+    }
+  } else if (g.temp > TEMP_OPT_MAX) {
+    rate = HATCH_RATE_HOT;
+  }
+  // Intimacy bonus
+  rate *= (1 + (g.intimacy / 100) * 0.5);
+
+  // Passive hatch: not heating, not icing -> every 30sec add 1%
+  if (!g.heatOn && !g.iceOn) {
+    g.passiveHatchTimer = (g.passiveHatchTimer || 0) + dt;
+    if (g.passiveHatchTimer >= 30) {
+      g.passiveHatchTimer = 0;
+      g.hatchPct = Math.min(100, g.hatchPct + 1);
+    }
+  } else {
+    g.passiveHatchTimer = 0;
+  }
+
+  // Hunger decay (only when pet exists) - 每秒下降0.01，约100分钟降到0
+  if (g.currentPet) {
+    g.hunger = Math.max(0, g.hunger - 0.01 * dt);
+  }
+
+  const oldStage = Math.floor(g.hatchPct / 20);
+  g.hatchPct = Math.min(100, g.hatchPct + rate * dt);
+  const newStage = Math.floor(g.hatchPct / 20);
+
+  // 裂纹阶段增加时播放音效
+  if (newStage > oldStage && newStage >= 1 && newStage <= 4) {
+    initAudio();
+    playSound('crack');
+  }
+
+  // Random events
+  g.eventCooldown -= dt;
+  if (g.eventCooldown <= 0 && !g.eventMsg) {
+    triggerRandomEvent();
+  }
+  if (g.eventMsg && g.eventTimer > 0) {
+    g.eventTimer -= dt;
+    if (g.eventTimer <= 0) {
+      g.eventMsg = '';
+    }
+  }
+
+  // Hatching check - hatchPct 100% 时直接孵化，不再受 nextHatchDay 限制
+  if (g.hatchPct >= 100 && !g.isHatching) {
+    startHatch();
+  }
+  if (g.isHatching) {
+    g.hatchAnim += dt * 60;
+    if (g.hatchAnim > 120) {
+      finalizeHatch();
+    }
+  }
+}
+
+function triggerRandomEvent() {
+  initAudio();
+  playSound('event');
+  const dayEvents = [
+    { text: '晴空万里！孵化+5%', effect: () => { g.hatchPct = Math.min(100, g.hatchPct + 5); } },
+    { text: '小虫靠近！获得虫子×1', effect: () => { g.inventory.worm = Math.min(INV_MAX, g.inventory.worm + 1); } },
+    { text: '发现野果！获得水果×1', effect: () => { g.inventory.fruit = Math.min(INV_MAX, g.inventory.fruit + 1); } },
+    { text: '热浪来袭！温度+3°C', effect: () => { g.temp = Math.min(TEMP_MAX, g.temp + 3); } },
+    { text: '蚊虫骚扰！亲密度-5', effect: () => { g.intimacy = Math.max(0, g.intimacy - 5); } },
+  ];
+  const nightEvents = [
+    { text: '月色温柔...亲密度+10', effect: () => { g.intimacy = Math.min(100, g.intimacy + 10); } },
+    { text: '流星划过！孵化+8%', effect: () => { g.hatchPct = Math.min(100, g.hatchPct + 8); } },
+    { text: '找到零食！获得饲料×1', effect: () => { g.inventory.treat = Math.min(INV_MAX, g.inventory.treat + 1); } },
+    { text: '寒流来袭！温度-5°C', effect: () => { g.temp = Math.max(TEMP_MIN, g.temp - 5); } },
+    { text: '做了噩梦...亲密度-5', effect: () => { g.intimacy = Math.max(0, g.intimacy - 5); } },
+  ];
+
+  const pool = g.isDay ? dayEvents : nightEvents;
+  const ev = pool[Math.floor(Math.random() * pool.length)];
+  g.eventMsg = ev.text;
+  g.eventTimer = 5;
+  ev.effect();
+  g.eventCooldown = g.isDay ? 120 : 90;
+
+  // Show event in DOM
+  const el = document.getElementById('evt');
+  el.textContent = ev.text;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function startHatch() {
+  g.isHatching = true;
+  g.hatchAnim = 0;
+}
+
+function finalizeHatch() {
+  initAudio();
+  playSound('hatch');
+  g.isHatching = false;
+  g.hatchPct = 0;
+
+  // Determine baby traits
+  const traits = [];
+  if (g.intimacy >= 80) traits.push('亲人');
+  if (g.intimacy >= 60) traits.push('活泼');
+  if (g.inventory.worm >= 3) traits.push('贪吃');
+  if (g.intimacy < 30) traits.push('调皮');
+  if (traits.length === 0) traits.push('普通');
+
+  const names = ['小火', '毛球', '蛋蛋', '小灰', '绒绒', '豆芽', '噗噗', '糖豆'];
+  const petName = names[Math.floor(Math.random() * names.length)];
+
+  // 随机基因 F1 代
+  const geneKeys = Object.keys(GENES);
+  const numGenes = Math.random() < 0.3 ? 2 : 1; // 30%概率双基因
+  const petGenes = [];
+  const shuffled = geneKeys.sort(() => Math.random() - 0.5);
+  for (let i = 0; i < numGenes; i++) petGenes.push(shuffled[i]);
+
+  // 随机星级：1-3星，概率权重
+  const starRoll = Math.random();
+  const star = starRoll < 0.5 ? 1 : (starRoll < 0.8 ? 2 : 3);
+
+  // 构造宠物对象
+  const newPet = {
+    id: Date.now(),
+    name: petName,
+    traits: [...traits],
+    star: star,
+    level: 1,
+    exp: 0,
+    genes: petGenes,         // 血脉基因数组
+    generation: 1,           // F1 原生代
+    father: null,
+    mother: null,
+    day: g.dayCount,
+    expireDay: g.dayCount + 10,  // 寿命10天
+    breedCount: 0,            // 已被繁殖次数
+  };
+
+  // 宠物上限检查：满了则拒绝孵化
+  if (g.pets.length >= PET_MAX) {
+    showToast('宠物已满！请放归一只宠物腾出位置');
+    g.hatchAnim = 0;
+    g.heatOn = false;
+    g.iceOn = false;
+    return;
+  }
+
+  g.pets.push(newPet);
+  g.currentPet = g.pets[g.pets.length - 1];
+  g.currentScene = 'pets'; // 孵化完成自动切换到宠物间
+  g.hunger = 100;
+
+  // 显示星级和基因
+  const starStr = '★'.repeat(star) + '☆'.repeat(5 - star);
+  const geneStr = petGenes.map(gk => GENES[gk].icon).join('');
+  const geneNameStr = petGenes.map(gk => GENES[gk].name).join('');
+  const canvasId = 'hatch_pet_sprite';
+
+  // 显示 overlay
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = `<div class="title">🎉 ${petName} 孵化成功！</div>
+    <canvas id="${canvasId}" width="64" height="64" style="image-rendering:pixelated;margin:8px auto;display:block;border:1px solid #444"></canvas>
+    <div style="color:${STAR_COLORS[star]};font-size:18px">${starStr}</div>
+    <div style="margin-top:4px">${geneStr} <span style="color:#aaa">${geneNameStr}</span></div>
+    <div style="color:#aaa">${traits.join('、')}</div>
+    <div style="color:#aaa;margin-top:6px">F1 · Lv.1</div>`;
+  overlay.classList.add('show');
+  setTimeout(() => {
+    const c = document.getElementById(canvasId);
+    if (c) drawPetSprite(c, newPet);
+  }, 50);
+
+  g.hatchAnim = 0;
+  g.heatOn = false;
+  g.iceOn = false;
+  saveGame();
+}
+
+function toggleHeat() {
+  initAudio();
+  if (g.power <= 0 && !g.heatOn) {
+    playSound('warning');
+    showToast('电量不足！');
+    return;
+  }
+  g.heatOn = !g.heatOn;
+  if (g.heatOn) {
+    g.iceOn = false; // 不能同时加热和冰敷
+    playSound('heatOn');
+  }
+  updateBtnUI();
+  saveGame();
+}
+
+function toggleIce() {
+  initAudio();
+  g.iceOn = !g.iceOn;
+  if (g.iceOn) {
+    g.heatOn = false; // 不能同时加热和冰敷
+    playSound('iceOn');
+  }
+  updateBtnUI();
+  saveGame();
+}
+
+function resetGame() {
+  if (!confirm('确定要重开吗？所有进度将清零！')) return;
+  localStorage.removeItem('hatchgame_save');
+  location.reload();
+}
+
+function doForage() {
+  initAudio();
+  if (g.forageCdLeft > 0) {
+    showToast(`冷却中 ${Math.ceil(g.forageCdLeft)}秒`);
+    return;
+  }
+  // 随机获得食物
+  const roll = Math.random();
+  let found = '';
+  if (roll < 0.5) {
+    g.inventory.worm = Math.min(INV_MAX, g.inventory.worm + 1);
+    found = '虫子×1';
+  } else if (roll < 0.8) {
+    g.inventory.fruit = Math.min(INV_MAX, g.inventory.fruit + 1);
+    found = '水果×1';
+  } else {
+    g.inventory.treat = Math.min(INV_MAX, g.inventory.treat + 1);
+    found = '零食×1';
+  }
+  playSound('forage');
+  showToast(`找到${found}！`);
+  g.forageCdLeft = FORAGE_COOLDOWN;
+  updateBtnUI();
+  saveGame();
+}
+
+function doPet() {
+  initAudio();
+  if (g.petCdLeft > 0) {
+    showToast(`冷却中 ${Math.ceil(g.petCdLeft)}秒`);
+    return;
+  }
+  if (!g.currentPet) return;
+  g.intimacy = Math.min(100, g.intimacy + 8);
+  playSound('pet');
+  g.petCdLeft = PET_COOLDOWN;
+  g.wobble = 10;
+  // 给予经验
+  addExp(g.currentPet, 5);
+  updateBtnUI();
+  saveGame();
+}
+
+function doFeed() {
+  initAudio();
+  const hasFood = g.inventory.worm > 0 || g.inventory.fruit > 0 || g.inventory.treat > 0;
+  if (!hasFood) {
+    showToast('没有食物了！');
+    return;
+  }
+  if (g.feedCdLeft > 0) {
+    showToast(`喂食冷却 ${Math.ceil(g.feedCdLeft)}秒`);
+    return;
+  }
+
+  // Use best available
+  if (g.inventory.treat > 0) {
+    g.inventory.treat--;
+    g.hunger = Math.min(100, g.hunger + 40);
+    g.intimacy = Math.min(100, g.intimacy + 15);
+    g.hatchPct = Math.min(100, g.hatchPct + 5);
+    playSound('feedTreat');
+    showToast('神秘饲料！饥饿+40 亲密度+15');
+  } else if (g.inventory.fruit > 0) {
+    g.inventory.fruit--;
+    g.hunger = Math.min(100, g.hunger + 25);
+    g.intimacy = Math.min(100, g.intimacy + 8);
+    g.hatchPct = Math.min(100, g.hatchPct + 2);
+    playSound('feedFruit');
+    showToast('水果！饥饿+25 亲密度+8');
+  } else if (g.inventory.worm > 0) {
+    g.inventory.worm--;
+    g.hunger = Math.min(100, g.hunger + 15);
+    g.intimacy = Math.min(100, g.intimacy + 4);
+    playSound('feedWorm');
+    showToast('虫子！饥饿+15 亲密度+4');
+  }
+  if (g.currentPet) addExp(g.currentPet, 8);
+  g.feedCdLeft = FEED_COOLDOWN;
+  updateBtnUI();
+  saveGame();
+}
+
+function showAlbum() {
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  if (g.pets.length === 0) {
+    msg.innerHTML = '<div class="title">📖 图鉴</div><div style="color:#aaa">还没有孵化过任何宠物</div>';
+  } else {
+    const list = g.pets.map((p, idx) => {
+      const canvasId = `pet_sprite_${idx}`;
+      const starStr = '★'.repeat(p.star) + '☆'.repeat(5 - p.star);
+      const geneStr = p.genes.map(gk => GENES[gk].icon).join('') || '无';
+      const daysLeft = p.expireDay - g.dayCount;
+      return `<div onclick="showPetDetail(${idx})" style="margin:4px 0;padding:6px;border-bottom:1px solid #333;display:flex;align-items:center;gap:10px;cursor:pointer">
+        <canvas id="${canvasId}" width="48" height="48" style="image-rendering:pixelated;border:1px solid #444"></canvas>
+        <div>
+          <span style="color:${STAR_COLORS[p.star]};font-size:14px">${p.name}</span>
+          <span style="color:${STAR_COLORS[p.star]};font-size:11px">${starStr}</span>
+          <div style="color:#aaa;font-size:11px;margin-top:1px">${geneStr} · F${p.generation} · Lv${p.level} · 剩${daysLeft}天</div>
+          <div style="color:#666;font-size:10px;margin-top:1px">${p.traits.join('、')}</div>
+        </div>
+      </div>`;
+    }).join('');
+    msg.innerHTML = `<div class="title">📖 图鉴 (${g.pets.length}/${PET_MAX})</div>${list}`;
+    setTimeout(() => {
+      g.pets.forEach((p, idx) => {
+        const c = document.getElementById(`pet_sprite_${idx}`);
+        if (c) drawPetSprite(c, p);
+      });
+    }, 50);
+  }
+  overlay.classList.add('show');
+}
+
+function drawPetSprite(canvas, pet, animTime) {
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, 48, 48);
+
+  const t = animTime || 0;
+  // 动画时间戳（秒）
+  const breathe = Math.sin(t * 2.5) * 1.5;     // 呼吸：上下浮动
+  const tailSwing = Math.sin(t * 3.5) * 2;       // 尾巴：左右摇摆
+  const earWiggle = Math.sin(t * 5) * 1.5;       // 耳朵：快速抖动（兔子）
+  // 眨眼：每4秒眨一次，持续0.15秒
+  const blinkCycle = t % 4;
+  const isBlinking = blinkCycle > 3.85;
+
+  // Generate colors and type from pet name + genes
+  const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h*31 + s.charCodeAt(i)) & 0xFFFF; return h; };
+  const h = hash(pet.name);
+
+  // Pet type: 0=猫, 1=狗, 2=兔子, 3=狐狸
+  const petType = h % 4;
+  const hue = (h * 7) % 360;
+
+  // 基因颜色融合
+  let geneHue = hue;
+  let geneSat = 55;
+  let geneLit = 55;
+  if (pet.genes && pet.genes.length > 0) {
+    const geneHues = pet.genes.map(gk => {
+      const g = GENES[gk];
+      // 从基因颜色提取色相
+      if (gk === 'fire') return 15;
+      if (gk === 'water') return 210;
+      if (gk === 'grass') return 120;
+      if (gk === 'electric') return 50;
+      if (gk === 'ice') return 190;
+      if (gk === 'dark') return 270;
+      if (gk === 'light') return 50;
+      if (gk === 'wind') return 150;
+      return 0;
+    });
+    geneHue = geneHues[0];
+    if (pet.genes.length > 1) geneSat = 70; // 双基因更鲜艳
+  }
+
+  const bodyColor = `hsl(${geneHue},${geneSat}%,55%)`;
+  const darkColor = `hsl(${geneHue},${geneSat}%,35%)`;
+  const lightColor = `hsl(${geneHue},${geneSat}%,75%)`;
+
+  const cx = 24, cy = 26 + breathe; // 呼吸影响全身位置
+
+  // Shadow（影子不浮动）
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(cx - 10, 40, 20, 4);
+
+  // ========== 尾巴 ==========
+  const tailOff = Math.round(tailSwing);
+  if (petType === 0) {
+    // 猫尾巴 (弯曲上扬+摇摆)
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx + 10 + tailOff, cy + 2, 4, 6);
+    ctx.fillRect(cx + 12 + tailOff, cy - 2, 4, 6);
+    ctx.fillRect(cx + 14 + tailOff, cy - 6, 3, 5);
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx + 15 + tailOff, cy - 4, 2, 3);
+  } else if (petType === 1) {
+    // 狗尾巴 (短小摇尾)
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx + 8 + tailOff, cy - 2, 5, 4);
+    ctx.fillRect(cx + 11 + tailOff, cy - 5, 4, 4);
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx + 13 + tailOff, cy - 4, 2, 3);
+  } else if (petType === 2) {
+    // 兔子尾巴 (圆球+摇摆)
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx + 10 + tailOff, cy + 6, 6, 6);
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx + 11 + tailOff, cy + 7, 4, 4);
+  } else {
+    // 狐狸尾巴 (大毛茸茸+摇摆)
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx + 8 + tailOff, cy, 6, 8);
+    ctx.fillRect(cx + 12 + tailOff, cy - 4, 6, 6);
+    ctx.fillRect(cx + 16 + tailOff, cy - 8, 4, 6);
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx + 18 + tailOff, cy - 6, 3, 4);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx + 17 + tailOff, cy - 4, 2, 3);
+  }
+
+  // ========== 身体 ==========
+  if (petType === 0) {
+    // 猫身体 (椭圆)
+    for (let y = -10; y <= 10; y++) {
+      const w = Math.floor(10 * (1 - y * y / 110));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, cy + y, w * 2, 1);
+    }
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx - 4, cy + 2, 8, 5);
+  } else if (petType === 1) {
+    // 狗身体 (圆)
+    for (let y = -10; y <= 10; y++) {
+      const w = Math.floor(11 * (1 - y * y / 115));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, cy + y, w * 2, 1);
+    }
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx - 5, cy + 3, 10, 5);
+  } else if (petType === 2) {
+    // 兔子身体 (圆胖)
+    for (let y = -11; y <= 11; y++) {
+      const w = Math.floor(12 * (1 - y * y / 130));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, cy + y, w * 2, 1);
+    }
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx - 5, cy + 4, 10, 5);
+  } else {
+    // 狐狸身体 (椭圆形)
+    for (let y = -10; y <= 10; y++) {
+      const w = Math.floor(10 * (1 - y * y / 115));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, cy + y, w * 2, 1);
+    }
+    ctx.fillStyle = lightColor;
+    ctx.fillRect(cx - 4, cy + 2, 8, 6);
+  }
+
+  // ========== 手 ==========
+  ctx.fillStyle = darkColor;
+  if (petType === 2) {
+    // 兔子小手 (圆)
+    ctx.fillRect(cx - 14, cy + 2, 5, 5);
+    ctx.fillRect(cx + 9, cy + 2, 5, 5);
+  } else {
+    // 正常小手
+    ctx.fillRect(cx - 13, cy + 4, 4, 6);
+    ctx.fillRect(cx + 9, cy + 4, 4, 6);
+  }
+
+  // ========== 脚 ==========
+  ctx.fillStyle = darkColor;
+  if (petType === 2) {
+    // 兔子大脚 (蹦蹦)
+    ctx.fillRect(cx - 9, cy + 10, 7, 5);
+    ctx.fillRect(cx + 2, cy + 10, 7, 5);
+  } else {
+    ctx.fillRect(cx - 8, cy + 10, 5, 4);
+    ctx.fillRect(cx + 3, cy + 10, 5, 4);
+  }
+
+  // ========== 头 ==========
+  const headY = cy - 12;
+  if (petType === 0) {
+    // 猫头 (圆+三角耳)
+    for (let y = -8; y <= 6; y++) {
+      const w = Math.floor(10 * (1 - y * y / 70));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, headY + y, w * 2, 1);
+    }
+    // 猫耳
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx - 12, headY - 6, 5, 8);
+    ctx.fillRect(cx - 9, headY - 10, 4, 5);
+    ctx.fillRect(cx + 7, headY - 6, 5, 8);
+    ctx.fillRect(cx + 5, headY - 10, 4, 5);
+    ctx.fillStyle = '#FFB6C1';
+    ctx.fillRect(cx - 11, headY - 4, 3, 4);
+    ctx.fillRect(cx + 8, headY - 4, 3, 4);
+  } else if (petType === 1) {
+    // 狗头 (圆脸+垂耳)
+    for (let y = -8; y <= 6; y++) {
+      const w = Math.floor(10 * (1 - y * y / 70));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, headY + y, w * 2, 1);
+    }
+    // 狗垂耳
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(cx - 13, headY - 2, 6, 10);
+    ctx.fillRect(cx + 7, headY - 2, 6, 10);
+    ctx.fillStyle = '#FFB6C1';
+    ctx.fillRect(cx - 12, headY, 4, 6);
+    ctx.fillRect(cx + 8, headY, 4, 6);
+  } else if (petType === 2) {
+    // 兔子头 (圆+长耳)
+    for (let y = -7; y <= 6; y++) {
+      const w = Math.floor(10 * (1 - y * y / 60));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, headY + y, w * 2, 1);
+    }
+    // 兔子长耳（+耳朵抖动）
+    const earOff = Math.round(earWiggle);
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx - 10 + earOff, headY - 20, 4, 18);
+    ctx.fillRect(cx + 6 - earOff, headY - 20, 4, 18);
+    ctx.fillStyle = '#FFB6C1';
+    ctx.fillRect(cx - 9 + earOff, headY - 18, 2, 14);
+    ctx.fillRect(cx + 7 - earOff, headY - 18, 2, 14);
+  } else {
+    // 狐狸头 (尖脸+大耳)
+    for (let y = -8; y <= 5; y++) {
+      const w = Math.floor(9 * (1 - y * y / 75));
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(cx - w, headY + y, w * 2, 1);
+    }
+    // 狐狸尖耳
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(cx - 12, headY - 8, 5, 10);
+    ctx.fillRect(cx - 9, headY - 12, 4, 5);
+    ctx.fillRect(cx + 7, headY - 8, 5, 10);
+    ctx.fillRect(cx + 5, headY - 12, 4, 5);
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(cx - 11, headY - 6, 3, 6);
+    ctx.fillRect(cx + 8, headY - 6, 3, 6);
+  }
+
+  // ========== 眼睛 ==========
+  if (isBlinking) {
+    // 眨眼：眯成一条线
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 7, headY - 1, 6, 2);
+    ctx.fillRect(cx + 1, headY - 1, 6, 2);
+  } else {
+    ctx.fillStyle = '#222';
+    if (petType === 0) {
+      // 猫眼 (竖瞳)
+      ctx.fillRect(cx - 8, headY - 3, 5, 5);
+      ctx.fillRect(cx + 3, headY - 3, 5, 5);
+      ctx.fillStyle = '#90EE90';
+      ctx.fillRect(cx - 8, headY - 3, 5, 5);
+      ctx.fillRect(cx + 3, headY - 3, 5, 5);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(cx - 6, headY - 2, 2, 4);
+      ctx.fillRect(cx + 5, headY - 2, 2, 4);
+    } else if (petType === 2) {
+      // 兔子眼 (大红圆)
+      ctx.fillRect(cx - 7, headY - 2, 6, 6);
+      ctx.fillRect(cx + 1, headY - 2, 6, 6);
+      ctx.fillStyle = '#FF4444';
+      ctx.fillRect(cx - 7, headY - 2, 6, 6);
+      ctx.fillRect(cx + 1, headY - 2, 6, 6);
+    } else {
+      // 普通圆眼
+      ctx.fillRect(cx - 7, headY - 2, 6, 6);
+      ctx.fillRect(cx + 1, headY - 2, 6, 6);
+    }
+    // 眼神光
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx - 6, headY - 2, 2, 2);
+    ctx.fillRect(cx + 2, headY - 2, 2, 2);
+  }
+
+  // ========== 鼻子嘴巴 ==========
+  if (petType === 0) {
+    // 猫嘴 (Y型)
+    ctx.fillStyle = '#FFB6C1';
+    ctx.fillRect(cx - 1, headY + 4, 2, 2);
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(cx - 2, headY + 6, 1, 2);
+    ctx.fillRect(cx + 1, headY + 6, 1, 2);
+    // 猫胡须
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx - 13, headY + 3, 5, 1);
+    ctx.fillRect(cx - 14, headY + 5, 6, 1);
+    ctx.fillRect(cx + 8, headY + 3, 5, 1);
+    ctx.fillRect(cx + 8, headY + 5, 6, 1);
+  } else if (petType === 1) {
+    // 狗鼻子+吐舌
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 2, headY + 3, 4, 3);
+    ctx.fillStyle = '#FF6B6B';
+    ctx.fillRect(cx - 1, headY + 6, 3, 4);
+  } else if (petType === 3) {
+    // 狐狸尖鼻
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 1, headY + 3, 2, 2);
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(cx - 2, headY + 5, 4, 2);
+  } else {
+    // 兔子三瓣嘴
+    ctx.fillStyle = '#FFB6C1';
+    ctx.fillRect(cx - 1, headY + 4, 2, 2);
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(cx - 2, headY + 6, 1, 2);
+    ctx.fillRect(cx + 1, headY + 6, 1, 2);
+  }
+
+  // 腮红
+  ctx.fillStyle = 'rgba(255,182,193,0.5)';
+  ctx.fillRect(cx - 11, headY + 1, 3, 2);
+  ctx.fillRect(cx + 8, headY + 1, 3, 2);
+}
+
+function closeOverlay() {
+  playSound('close');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+function updateBtnUI() {
+  const btnHeat = document.getElementById('btnHeat');
+  const heatStatus = document.getElementById('heatStatus');
+  btnHeat.className = 'bt' + (g.heatOn ? '' : ' off');
+  heatStatus.textContent = g.heatOn ? '开启' : '关闭';
+
+  const btnIce = document.getElementById('btnIce');
+  const iceStatus = document.getElementById('iceStatus');
+  btnIce.className = 'bt' + (g.iceOn ? '' : ' off');
+  iceStatus.textContent = g.iceOn ? '使用中' : '可用';
+
+  const btnPet = document.getElementById('btnPet');
+  const petCdEl = document.getElementById('petCd');
+  const btnFeed = document.getElementById('btnFeed');
+  const feedStatus = document.getElementById('feedStatus');
+  const btnBreed = document.getElementById('btnBreed');
+
+  // 找食物按钮始终显示
+  const forageCdEl = document.getElementById('forageCd');
+  forageCdEl.textContent = g.forageCdLeft > 0 ? `${Math.ceil(g.forageCdLeft)}秒` : '可用';
+
+  // 只有宠物孵化后才显示抚摸和喂食
+  if (g.currentPet) {
+    btnPet.style.display = '';
+    btnFeed.style.display = '';
+    petCdEl.textContent = g.petCdLeft > 0 ? `${Math.ceil(g.petCdLeft)}秒` : '可用';
+    const totalFood = g.inventory.worm + g.inventory.fruit + g.inventory.treat;
+    feedStatus.textContent = totalFood > 0 ? (g.feedCdLeft > 0 ? `${Math.ceil(g.feedCdLeft)}秒` : '可用') : '无食物';
+  } else {
+    btnPet.style.display = 'none';
+    btnFeed.style.display = 'none';
+  }
+
+  // 繁殖按钮：有2只以上宠物时可用
+  if (btnBreed) {
+    const breedStatus = document.getElementById('breedStatus');
+    if (g.pets.length >= 2) {
+      btnBreed.style.display = '';
+      breedStatus.textContent = '可用';
+    } else {
+      btnBreed.style.display = 'none';
+    }
+  }
+}
+
+function showToast(msg) {
+  const el = document.getElementById('evt');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ─── Save / Load ────────────────────────────────────────────────
+function saveGame() {
+  const data = {
+    temp: g.temp, hatchPct: g.hatchPct, intimacy: g.intimacy,
+    power: g.power, heatOn: g.heatOn, iceOn: g.iceOn, time: g.time,
+    isDay: g.isDay, inventory: g.inventory, pets: g.pets,
+    petCdLeft: g.petCdLeft, feedCdLeft: g.feedCdLeft, forageCdLeft: g.forageCdLeft,
+    hunger: g.hunger, currentPet: g.currentPet,
+    dayCount: g.dayCount, nextHatchDay: g.nextHatchDay,
+    lastSave: Date.now()
+  };
+  try {
+    localStorage.setItem('hatchgame_save', JSON.stringify(data));
+  } catch(e) {}
+}
+
+function loadGame() {
+  try {
+    const raw = localStorage.getItem('hatchgame_save');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    Object.assign(g, data);
+    // Restore currentPet reference (since JSON.parse creates new objects)
+    if (g.currentPet && g.pets.length > 0) {
+      const cp = g.pets.find(p => p.name === g.currentPet.name && p.day === g.currentPet.day);
+      if (cp) g.currentPet = cp;
+      else g.currentPet = g.pets[g.pets.length - 1];
+    }
+    // 旧存档升级：补全新宠物字段
+    g.pets.forEach(p => {
+      if (p.star === undefined) p.star = 1;
+      if (p.level === undefined) p.level = 1;
+      if (p.exp === undefined) p.exp = 0;
+      if (p.genes === undefined) p.genes = [];
+      if (p.generation === undefined) p.generation = 1;
+      if (p.father === undefined) p.father = null;
+      if (p.mother === undefined) p.mother = null;
+      if (p.breedCount === undefined) p.breedCount = 0;
+    });
+    // Offline progress
+    if (data.lastSave) {
+      const offline = (Date.now() - data.lastSave) / 1000; // 秒
+      const offlineMins = Math.min(offline / 60, 10); // 转换为分钟，最多10分钟离线
+      g.temp = Math.max(TEMP_MIN, g.temp - offlineMins * 0.02);
+      g.hatchPct = Math.min(100, g.hatchPct + offlineMins * 0.05);
+      if (g.hunger !== undefined) {
+        g.hunger = Math.max(0, g.hunger - offlineMins * 0.5); // 离线饥饿度下降
+      }
+    }
+    // Handle old saves without nextHatchDay
+    if (g.nextHatchDay === undefined) {
+      g.nextHatchDay = 0;
+    }
+  } catch(e) {}
+}
+
+// ─── Scene helpers: render to any ctx ──────────────────────────
+function drawTextToCtx(targetCtx, x, y, text, color, scale) {
+  targetCtx.imageSmoothingEnabled = false;
+  const hasCJK = /[^\x00-\x7E]/.test(text);
+  if (hasCJK) {
+    targetCtx.fillStyle = color;
+    const fontSize = Math.max(14, Math.floor(14 * scale));
+    targetCtx.font = `bold ${fontSize}px "Courier New", Courier, monospace`;
+    targetCtx.textBaseline = 'top';
+    targetCtx.fillText(text, Math.floor(x), Math.floor(y));
+    return;
+  }
+  const iy = Math.floor(y);
+  let cx = Math.floor(x);
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i].toUpperCase();
+    const pat = PIXEL_FONT[ch];
+    if (pat) {
+      const pw = pat[0].length, ph = pat.length;
+      const ps = Math.max(2, Math.floor(scale * 2));
+      for (let py = 0; py < ph; py++) {
+        for (let px2 = 0; px2 < pw; px2++) {
+          if (pat[py][px2]) {
+            targetCtx.fillStyle = color;
+            targetCtx.fillRect(cx + px2 * ps, iy + py * ps, ps, ps);
+          }
+        }
+      }
+      cx += (pw + 1) * ps;
+    } else {
+      cx += 6 * scale;
+    }
+  }
+}
+
+function drawBgToCtx(targetCtx) {
+  const isDay = g.isDay;
+  if (isDay) {
+    targetCtx.fillStyle = '#4A90D9'; targetCtx.fillRect(0, 0, 720, 120);
+    targetCtx.fillStyle = '#87CEEB'; targetCtx.fillRect(0, 120, 720, 100);
+    targetCtx.fillStyle = '#B8E0F0'; targetCtx.fillRect(0, 220, 720, 80);
+    targetCtx.fillStyle = '#FFEFD5'; targetCtx.fillRect(0, 300, 720, 60);
+    targetCtx.fillStyle = 'rgba(255,200,100,0.15)'; targetCtx.fillRect(0, 340, 720, 30);
+  } else {
+    targetCtx.fillStyle = '#050a1a'; targetCtx.fillRect(0, 0, 720, 120);
+    targetCtx.fillStyle = '#0d1530'; targetCtx.fillRect(0, 120, 720, 100);
+    targetCtx.fillStyle = '#101d40'; targetCtx.fillRect(0, 220, 720, 100);
+    targetCtx.fillStyle = '#0a1228'; targetCtx.fillRect(0, 320, 720, 80);
+  }
+  // Mountains
+  targetCtx.fillStyle = isDay ? '#6B8E6B' : '#1a2040';
+  targetCtx.beginPath();
+  targetCtx.moveTo(0, 360); targetCtx.lineTo(80, 220); targetCtx.lineTo(160, 280);
+  targetCtx.lineTo(240, 200); targetCtx.lineTo(320, 260); targetCtx.lineTo(400, 180);
+  targetCtx.lineTo(480, 240); targetCtx.lineTo(560, 200); targetCtx.lineTo(640, 260);
+  targetCtx.lineTo(720, 220); targetCtx.lineTo(720, 360); targetCtx.closePath();
+  targetCtx.fill();
+  targetCtx.fillStyle = isDay ? '#4A7040' : '#151d35';
+  targetCtx.beginPath();
+  targetCtx.moveTo(0, 380); targetCtx.lineTo(60, 280); targetCtx.lineTo(140, 320);
+  targetCtx.lineTo(220, 260); targetCtx.lineTo(300, 300); targetCtx.lineTo(380, 240);
+  targetCtx.lineTo(460, 280); targetCtx.lineTo(540, 260); targetCtx.lineTo(620, 300);
+  targetCtx.lineTo(720, 260); targetCtx.lineTo(720, 380); targetCtx.closePath();
+  targetCtx.fill();
+  targetCtx.fillStyle = isDay ? '#3A5A30' : '#101828';
+  targetCtx.beginPath();
+  targetCtx.moveTo(0, 400); targetCtx.lineTo(100, 340); targetCtx.lineTo(200, 370);
+  targetCtx.lineTo(300, 320); targetCtx.lineTo(400, 360); targetCtx.lineTo(500, 310);
+  targetCtx.lineTo(600, 350); targetCtx.lineTo(720, 330); targetCtx.lineTo(720, 400);
+  targetCtx.closePath();
+  targetCtx.fill();
+  // Ground layers
+  targetCtx.fillStyle = isDay ? '#7CBA5F' : '#1a2a10';
+  targetCtx.fillRect(0, 400, 720, 30);
+  targetCtx.fillStyle = isDay ? '#5A9A3F' : '#151f0d';
+  targetCtx.fillRect(0, 430, 720, 40);
+  targetCtx.fillStyle = isDay ? '#4A7A2F' : '#101508';
+  targetCtx.fillRect(0, 470, 720, 106);
+  // Grass blades
+  targetCtx.fillStyle = isDay ? '#6AAA4F' : '#1a2a10';
+  for (let i = 0; i < 30; i++) {
+    const gx = (i * 25 + 5) % 710;
+    targetCtx.fillRect(gx, 465, 2, 12);
+    targetCtx.fillRect(gx + 4, 467, 1, 10);
+  }
+  // Day decorations
+  if (isDay) {
+    for (let i = 0; i < 5; i++) {
+      const fx = 80 + i * 130;
+      targetCtx.fillStyle = '#fff'; targetCtx.fillRect(fx, 436, 4, 4);
+      targetCtx.fillStyle = '#FFD700'; targetCtx.fillRect(fx + 1, 435, 2, 2);
+    }
+    const stones = [[50, 450], [180, 455], [400, 448], [600, 452], [650, 458]];
+    stones.forEach(([sx, sy]) => {
+      targetCtx.fillStyle = '#888'; targetCtx.fillRect(sx, sy, 8, 5);
+      targetCtx.fillStyle = '#999'; targetCtx.fillRect(sx + 1, sy - 1, 5, 3);
+    });
+    targetCtx.fillStyle = '#654321'; targetCtx.fillRect(620, 410, 6, 30);
+    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(613, 400, 20, 15);
+    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(618, 395, 14, 10);
+    targetCtx.fillStyle = '#654321'; targetCtx.fillRect(80, 415, 5, 25);
+    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(73, 407, 18, 12);
+    targetCtx.fillStyle = '#555'; targetCtx.fillRect(300, 445, 25, 5);
+    targetCtx.fillStyle = '#666'; targetCtx.fillRect(305, 442, 15, 4);
+    for (let i = 0; i < 6; i++) {
+      const bx = 280 + i * 12;
+      targetCtx.fillStyle = '#ddd'; targetCtx.fillRect(bx, 437, 8, 3);
+    }
+  } else {
+    // Night stars
+    const stars = [[50,30],[120,60],[200,25],[300,50],[380,20],[450,55],[520,35],[600,50],[660,25],[150,80],[350,75],[550,70],[700,60]];
+    stars.forEach(([sx, sy]) => {
+      const twink = Math.sin(g.lastTs / 1000 + sx) > 0.5 ? 1.5 : 1.0;
+      targetCtx.fillStyle = `rgba(255,255,200,${twink > 1 ? 0.9 : 0.5})`;
+      targetCtx.fillRect(sx, sy, twink, twink);
+    });
+    // Moon
+    targetCtx.fillStyle = '#FFFACD';
+    targetCtx.beginPath(); targetCtx.arc(620, 70, 28, 0, Math.PI * 2); targetCtx.fill();
+    targetCtx.fillStyle = '#E8E4B8';
+    [[608, 60, 5], [628, 75, 4], [618, 82, 3], [632, 58, 3]].forEach(([mx, my, mr]) => {
+      targetCtx.beginPath(); targetCtx.arc(mx, my, mr, 0, Math.PI * 2); targetCtx.fill();
+    });
+  }
+}
+
+function drawSunMoonToCtx(targetCtx) {
+  const isDay = g.isDay;
+  const t = g.time;
+  if (isDay) {
+    const sunX = 100 + (t / CYCLE) * 520;
+    const sunY = 80 - Math.sin((t / CYCLE) * Math.PI) * 30;
+    targetCtx.fillStyle = '#FFD700';
+    targetCtx.beginPath(); targetCtx.arc(sunX, sunY, 22, 0, Math.PI * 2); targetCtx.fill();
+    targetCtx.fillStyle = '#FFA500';
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + g.lastTs / 2000;
+      targetCtx.fillRect(sunX + Math.cos(a) * 28 - 1, sunY + Math.sin(a) * 28 - 6, 3, 12);
+    }
+    if (sunX > 300) {
+      const cloudX = sunX - 80, cloudY = sunY - 20;
+      targetCtx.fillStyle = 'rgba(255,255,255,0.8)';
+      [[cloudX, cloudY, 24], [cloudX + 18, cloudY - 8, 18], [cloudX + 30, cloudY + 2, 16]].forEach(([cx, cy, cr]) => {
+        targetCtx.beginPath(); targetCtx.arc(cx, cy, cr, 0, Math.PI * 2); targetCtx.fill();
+      });
+    }
+  } else {
+    targetCtx.fillStyle = '#FFFACD';
+    targetCtx.beginPath(); targetCtx.arc(620, 70, 28, 0, Math.PI * 2); targetCtx.fill();
+    targetCtx.fillStyle = '#E8E4B8';
+    [[608, 60, 5], [628, 75, 4], [618, 82, 3], [632, 58, 3]].forEach(([mx, my, mr]) => {
+      targetCtx.beginPath(); targetCtx.arc(mx, my, mr, 0, Math.PI * 2); targetCtx.fill();
+    });
+    targetCtx.strokeStyle = '#D4C896'; targetCtx.lineWidth = 2;
+    targetCtx.beginPath(); targetCtx.arc(608, 65, 10, 0, Math.PI * 2); targetCtx.stroke();
+  }
+}
+
+function drawIncubatorToCtx(targetCtx) {
+  const ex = 360, ey = 270, ew = 180, eh = 120;
+  targetCtx.fillStyle = '#3a3020';
+  targetCtx.fillRect(ex - ew/2 - 4, ey - eh/2 - 4, ew + 8, eh + 8);
+  targetCtx.fillStyle = '#2a2010';
+  targetCtx.fillRect(ex - ew/2, ey - eh/2, ew, eh);
+  targetCtx.fillStyle = 'rgba(255,200,100,0.08)';
+  targetCtx.fillRect(ex - ew/2, ey - eh/2, ew, eh);
+  targetCtx.strokeStyle = '#555';
+  targetCtx.lineWidth = 2;
+  targetCtx.strokeRect(ex - ew/2, ey - eh/2, ew, eh);
+  targetCtx.fillStyle = '#4a3a20';
+  targetCtx.fillRect(ex - ew/2 - 8, ey - eh/2 + eh - 20, ew + 16, 20);
+  targetCtx.fillRect(ex - ew/2 - 8, ey - eh/2, 8, eh);
+  targetCtx.fillRect(ex + ew/2, ey - eh/2, 8, eh);
+}
+
+function drawEggToCtx(targetCtx) {
+  if (g.hatchPct >= 100 || g.isHatching) return;
+  const ex = 360, ey = 270;
+  const crack = Math.floor(g.hatchPct / 25);
+  const eggW = 60, eggH = 82;
+  targetCtx.save();
+  targetCtx.imageSmoothingEnabled = false;
+  // Egg body - 真正的椭圆蛋形
+  for (let py = -eggH / 2; py < eggH / 2; py++) {
+    const prog = py / (eggH / 2);
+    let w;
+    if (py < 0) {
+      w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85));
+    } else {
+      w = Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
+    }
+    let col;
+    if (py < -eggH / 4) {
+      col = '#f8f0e0';
+    } else if (py < 0) {
+      col = '#f5e6c8';
+    } else if (py < eggH / 4) {
+      col = '#eed8a8';
+    } else {
+      col = '#e8d098';
+    }
+    targetCtx.fillStyle = col;
+    targetCtx.fillRect(ex - w, ey + py, w * 2, 1);
+  }
+  // 斑点装饰
+  targetCtx.fillStyle = 'rgba(180, 140, 80, 0.35)';
+  const spots = [[-15, -25], [10, -15], [-5, 5], [18, -5], [-20, 10], [12, 20]];
+  spots.forEach(([dx, dy]) => {
+    const spotW = 5 + Math.abs(dx) % 3;
+    targetCtx.fillRect(ex + dx - spotW / 2, ey + dy - spotW / 2, spotW, spotW);
+  });
+  // 高光
+  targetCtx.fillStyle = 'rgba(255, 255, 240, 0.6)';
+  targetCtx.fillRect(ex - 12, ey - eggH / 2 + 12, 6, 10);
+  // Crack stages
+  if (crack > 0) {
+    targetCtx.fillStyle = '#5a4030';
+    const cracks = [
+      [[-8, -18], [2, -12]],
+      [[-18, 0], [8, 6], [-6, 14]],
+      [[-24, -6], [14, -10], [-12, 20], [2, -24]],
+    ];
+    cracks.slice(0, crack).forEach(crackGroup => {
+      crackGroup.forEach(([cx, cy]) => {
+        targetCtx.fillRect(ex + cx - 2, ey + cy - 2, 6, 4);
+      });
+    });
+  }
+  targetCtx.restore();
+  // Progress bar
+  const bx = ex - 60, by = ey + eggH / 2 + 12, bw = 120, bh = 10;
+  targetCtx.fillStyle = '#222';
+  targetCtx.fillRect(bx, by, bw, bh);
+  targetCtx.fillStyle = g.hatchPct < 100 ? '#FFD700' : '#4CAF50';
+  targetCtx.fillRect(bx, by, bw * g.hatchPct / 100, bh);
+  drawTextToCtx(targetCtx, bx, by + 12, `孵化 ${Math.floor(g.hatchPct)}%`, P.dim, 1);
+  // Days hint
+  if (g.nextHatchDay > 0) {
+    const daysLeft = g.nextHatchDay - g.dayCount;
+    if (daysLeft > 0) drawTextToCtx(targetCtx, ex - 75, ey + eggH / 2 + 30, `还剩${daysLeft}天`, P.warn, 2);
+    drawTextToCtx(targetCtx, ex - 64, ey + eggH / 2 + 55, `(${g.dayCount}天)`, P.dim, 2);
+  }
+}
+
+function drawHatchingAnimToCtx(targetCtx) {
+  if (!g.isHatching) return;
+  const ex = 360, ey = 270;
+  const t = g.hatchAnim;
+  // Egg wobble
+  const wobble = Math.sin(t * 20) * (3 + t * 5);
+  targetCtx.save();
+  targetCtx.imageSmoothingEnabled = false;
+  // Glowing crack
+  targetCtx.fillStyle = `rgba(255,220,100,${0.3 + t * 0.5})`;
+  targetCtx.beginPath(); targetCtx.arc(ex + wobble, ey, 50 + t * 20, 0, Math.PI * 2); targetCtx.fill();
+  targetCtx.fillStyle = '#f5e6c8';
+  targetCtx.beginPath(); targetCtx.ellipse(ex + wobble, ey, 35, 45, 0, 0, Math.PI * 2); targetCtx.fill();
+  // Flash
+  if (t > 0.8) {
+    const flash = (t - 0.8) / 0.2;
+    targetCtx.fillStyle = `rgba(255,255,200,${flash * 0.8})`;
+    targetCtx.beginPath(); targetCtx.ellipse(ex, ey, 60 + flash * 30, 70 + flash * 30, 0, 0, Math.PI * 2); targetCtx.fill();
+  }
+  targetCtx.restore();
+}
+
+function drawPetToCtx(targetCtx) {
+  if (!g.currentPet) return;
+  const pet = g.currentPet;
+  const px = 360, py = 230;
+  const scale = 2.5;
+  const petCanvas = document.createElement('canvas');
+  petCanvas.width = 48; petCanvas.height = 48;
+  drawPetSprite(petCanvas, pet, g.lastTs / 1000);
+  targetCtx.save();
+  targetCtx.imageSmoothingEnabled = false;
+  targetCtx.drawImage(petCanvas, px - 24 * scale, py - 24 * scale, 48 * scale, 48 * scale);
+  targetCtx.restore();
+  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
+  drawTextToCtx(targetCtx, px - 40, py - 120, pet.name, P.txt, 2);
+  drawTextToCtx(targetCtx, px - 40, py - 96, starStr, STAR_COLORS[pet.star], 1);
+  const geneStr = pet.genes.map(gk => GENES[gk].icon).join('');
+  if (geneStr) drawTextToCtx(targetCtx, px + 50, py - 112, geneStr, P.dim, 1);
+  drawTextToCtx(targetCtx, px + 50, py - 96, `Lv${pet.level}`, '#aaa', 1);
+  if (g.hunger < 30) drawTextToCtx(targetCtx, px + 90, py - 100, '饿了!', P.danger, 2);
+  if (pet.expireDay) {
+    const daysLeft = pet.expireDay - g.dayCount;
+    const daysColor = daysLeft <= 3 ? P.danger : '#aaa';
+    drawTextToCtx(targetCtx, px - 35, py + 130, `剩${daysLeft}天`, daysColor, 2);
+  }
+  const expForNext = EXP_TABLE[pet.level] || 100;
+  const expPct = Math.min(1, pet.exp / expForNext);
+  targetCtx.fillStyle = '#333'; targetCtx.fillRect(px - 50, py + 150, 100, 8);
+  targetCtx.fillStyle = '#4CAF50'; targetCtx.fillRect(px - 50, py + 150, 100 * expPct, 8);
+  drawTextToCtx(targetCtx, px - 50, py + 160, `EXP ${pet.exp}/${expForNext}`, '#aaa', 1);
+}
+
+
+// ─── Main Loop ──────────────────────────────────────────────────
+function loop() {
+  const now = Date.now();
+  const dt = Math.min((now - g.lastTs) / 1000, 1);
+  g.lastTs = now;
+
+  update(dt);
+
+  // 更新场景切换动画
+  if (g.sceneTransition.active) {
+    g.sceneTransition.progress += dt / 0.3; // 300ms过渡
+    if (g.sceneTransition.progress >= 1) {
+      g.sceneTransition.progress = 1;
+      g.sceneTransition.active = false;
+      g.currentScene = g.sceneTransition.to;
+      saveGame();
+    }
+  }
+
+  // Render (canvas 720x576)
+  ctx.clearRect(0, 0, 720, 576);
+
+  // ─── 滑动过渡渲染 ───
+  if (g.sceneTransition.active) {
+    const p = g.sceneTransition.progress;
+    const ease = 1 - Math.pow(1 - p, 3); // ease-out cubic
+    const toPets = g.sceneTransition.to === 'pets';
+
+    // 旧场景和新场景的偏移量
+    const oldOffset = Math.round((toPets ? ease : -ease) * 720);
+    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * 720);
+
+    // ── 旧场景 ──
+    const oldCanvas = document.createElement('canvas');
+    oldCanvas.width = 720; oldCanvas.height = 576;
+    const oldCtx = oldCanvas.getContext('2d');
+    oldCtx.imageSmoothingEnabled = false;
+    if (g.sceneTransition.from === 'incubator') {
+      drawBgToCtx(oldCtx);
+      drawSunMoonToCtx(oldCtx);
+      drawIncubatorToCtx(oldCtx);
+      if (g.isHatching) drawHatchingAnimToCtx(oldCtx);
+      else drawEggToCtx(oldCtx);
+    } else {
+      drawBgToCtx(oldCtx);
+      drawSunMoonToCtx(oldCtx);
+      if (g.currentPet) drawPetToCtx(oldCtx);
+      else { drawTextToCtx(oldCtx, 300, 260, '还没有宠物', P.dim, 2); drawTextToCtx(oldCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1); }
+    }
+    ctx.drawImage(oldCanvas, oldOffset, 0);
+
+    // ── 新场景 ──
+    const newCanvas = document.createElement('canvas');
+    newCanvas.width = 720; newCanvas.height = 576;
+    const newCtx = newCanvas.getContext('2d');
+    newCtx.imageSmoothingEnabled = false;
+    if (g.sceneTransition.to === 'incubator') {
+      drawBgToCtx(newCtx);
+      drawSunMoonToCtx(newCtx);
+      drawIncubatorToCtx(newCtx);
+      if (g.isHatching) drawHatchingAnimToCtx(newCtx);
+      else drawEggToCtx(newCtx);
+    } else {
+      drawBgToCtx(newCtx);
+      drawSunMoonToCtx(newCtx);
+      if (g.currentPet) drawPetToCtx(newCtx);
+      else { drawTextToCtx(newCtx, 300, 260, '还没有宠物', P.dim, 2); drawTextToCtx(newCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1); }
+    }
+    ctx.drawImage(newCanvas, newOffset, 0);
+  } else {
+    // 正常渲染当前场景
+    drawBg();
+    drawSunMoon();
+    if (g.currentScene === 'incubator') {
+      drawIncubator();
+      if (g.isHatching) {
+        drawHatchingAnim();
+      } else {
+        drawEgg();
+      }
+    } else {
+      if (g.currentPet) {
+        drawPet();
+      } else {
+        drawText('还没有宠物', 300, 260, P.dim, 2);
+        drawText('去孵蛋室孵化吧', 290, 290, P.dim, 1);
+      }
+    }
+  }
+
+  // ─── 场景切换箭头（覆盖在场景内容上方，滑动时隐藏） ───
+  if (!g.sceneTransition.active) {
+    const canSwitchToPets = g.currentPet !== null;
+
+    // 左箭头：圆形按钮 + 三角形（宠物间时显示）
+    if (g.currentScene === 'pets') {
+      // 圆形背景
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(28, 288, 24, 0, Math.PI * 2);
+      ctx.fill();
+      // 三角形箭头
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.moveTo(36, 288);
+      ctx.lineTo(16, 274);
+      ctx.lineTo(16, 302);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 右箭头：圆形按钮 + 三角形（孵蛋室且有宠物时显示）
+    if (g.currentScene === 'incubator' && canSwitchToPets) {
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(692, 288, 24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.moveTo(684, 288);
+      ctx.lineTo(704, 274);
+      ctx.lineTo(704, 302);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // 场景标签（顶部居中）
+  const sceneLabel = g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间';
+  drawText(sceneLabel, 310, 8, '#aaa', 1);
+
+  drawHUD();
+  drawFeedInventory();
+  drawPetsList();
+
+  // 每帧更新按钮UI（冷却时间等）
+  updateBtnUI();
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Init ────────────────────────────────────────────────────────
+loadGame();
+updateBtnUI();
+g.lastTs = Date.now();
+loop();
+
+// Auto-save every 30s
+setInterval(saveGame, 30000);
+</script>
+</body>
+</html>
