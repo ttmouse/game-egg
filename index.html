@@ -46,12 +46,13 @@ body {
   -moz-osx-font-smoothing: unset;
   font-smooth: never;
   background: #0a0a0a;
-  /* 保持宽高比，居中显示 */
-  max-width: min(720px, calc(100vw - 16px));
-  max-height: calc(100vh - 160px);
-  width: auto;
+  /* 宽度撑满，高度自适应，保持 720:576 比例 */
+  width: min(720px, 100vw);
   height: auto;
-  object-fit: contain;
+  aspect-ratio: 720 / 576;
+  /* 防止溢出 */
+  max-width: 100vw;
+  max-height: calc(100vh - 120px);
 }
 #btns {
   display: flex;
@@ -137,7 +138,7 @@ body {
 </head>
 <body>
 <div id="wrap">
-  <canvas id="c" width="360" height="288"></canvas>
+  <canvas id="c"></canvas>
   <div id="btns">
     <button class="bt" id="btnHeat" onclick="toggleHeat()">🔥 加热<br><span class="cooldown" id="heatStatus">开启</span></button>
     <button class="bt" id="btnIce" onclick="toggleIce()">🧊 冰袋<br><span class="cooldown" id="iceStatus">可用</span></button>
@@ -436,6 +437,8 @@ function playSound(name) {
 
 // ─── Canvas ─────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
+canvas.width = 720;
+canvas.height = 576;
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
