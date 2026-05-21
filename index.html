@@ -575,7 +575,9 @@ canvas.addEventListener('click', (e) => {
           x: mx,
           y: my,
           type: foodType,
-          timer: 60
+          timer: 60,
+          fallY: -120,    // 从天而降的起始偏移
+          phase: 'fall'   // fall → bounce → idle
         });
         initAudio();
         playSound('forage');
@@ -3270,14 +3272,17 @@ const FOOD_ICONS = {
 
 function drawDroppedFood() {
   g.droppedFood.forEach(f => {
-    const alpha = Math.min(1, f.timer / 10); // 最后10秒淡出
+    const alpha = Math.min(1, f.timer / 10);
     ctx.globalAlpha = alpha;
-    // 食物脚下小阴影
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
-    // 食物图标
+    const drawY = f.y + Math.max(0, f.fallY); // 下落偏移只影响视觉Y
+    // 食物阴影（落地后才显示）
+    if (f.phase !== 'fall') {
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
+    }
+    // 食物图标（随下落偏移移动）
     const draw = FOOD_ICONS[f.type];
-    if (draw) draw(f.x, f.y);
+    if (draw) draw(f.x, drawY);
     ctx.globalAlpha = 1;
   });
 }
@@ -3326,9 +3331,30 @@ function seekFood(pet, dt) {
 
 // ─── 地面食物更新 ───────────────────────────────────────────────
 function updateDroppedFood(dt) {
-  // 更新计时器，移除过期的
   g.droppedFood = g.droppedFood.filter(f => {
     f.timer -= dt;
+
+    // 下落弹跳动画
+    if (f.phase === 'fall') {
+      f.fallY += dt * 400; // 加速下落
+      if (f.fallY >= 0) {
+        f.fallY = 0;
+        f.phase = 'bounce';
+        f.bounceV = -30; // 弹起速度
+      }
+    } else if (f.phase === 'bounce') {
+      f.fallY += f.bounceV * dt * 4;
+      f.bounceV += 120 * dt; // 重力
+      if (f.fallY >= 0) {
+        f.fallY = 0;
+        f.bounceV = -f.bounceV * 0.4; // 衰减
+        if (Math.abs(f.bounceV) < 10) {
+          f.fallY = 0;
+          f.phase = 'idle';
+        }
+      }
+    }
+
     return f.timer > 0;
   });
 }
