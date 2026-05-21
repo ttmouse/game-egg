@@ -435,7 +435,7 @@ function playSound(name) {
 // ─── Canvas ─────────────────────────────────────────────────────
 const canvas = document.getElementById('c');
 canvas.width = 720;
-canvas.height = 900;
+canvas.height = 720;
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
@@ -1994,7 +1994,7 @@ let petListRegions = []; // 存储底部宠物列表的点击区域
 function drawPetsList() {
   if (g.pets.length === 0) return;
 
-  const startX = 16, startY = 456;
+  const startX = 16, startY = Math.floor(canvas.height * 0.82);
   const petW = 64, petH = 64, gap = 8;
   petListRegions = [];
 
@@ -2149,20 +2149,20 @@ function drawHUD() {
 
 function drawFeedInventory() {
   ctx.imageSmoothingEnabled = false;
-  // Bottom bar - 720宽度，y从512到576
+  // Bottom bar - 贴近 canvas 底部
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(0, 520, 720, 56);
+  ctx.fillRect(0, canvas.height - 56, 720, 56);
 
   // 道具图标
-  drawText('道具', 8, 530, P.dim, 1);
-  drawText(`虫${g.inventory.worm}`, 76, 530, g.inventory.worm > 0 ? P.txt : P.dim, 1);
-  drawText(`果${g.inventory.fruit}`, 144, 530, g.inventory.fruit > 0 ? P.txt : P.dim, 1);
-  drawText(`饲${g.inventory.treat}`, 212, 530, g.inventory.treat > 0 ? P.heart : P.dim, 1);
+  drawText('道具', 8, canvas.height - 46, P.dim, 1);
+  drawText(`虫${g.inventory.worm}`, 76, canvas.height - 46, g.inventory.worm > 0 ? P.txt : P.dim, 1);
+  drawText(`果${g.inventory.fruit}`, 144, canvas.height - 46, g.inventory.fruit > 0 ? P.txt : P.dim, 1);
+  drawText(`饲${g.inventory.treat}`, 212, canvas.height - 46, g.inventory.treat > 0 ? P.heart : P.dim, 1);
 
   // Heat/Ice status (右侧)
   const heatStr = g.heatOn ? (g.power > 0 ? '加热中' : '无电量') : (g.iceOn ? '冰敷中' : '加热关');
   const hColor = g.heatOn ? (g.power > 0 ? P.danger : P.dim) : (g.iceOn ? '#00BFFF' : P.dim);
-  drawText(heatStr, 600, 530, hColor, 1);
+  drawText(heatStr, 600, canvas.height - 46, hColor, 1);
 }
 
 // ─── Pet Exp / Level System ─────────────────────────────────────
@@ -3888,14 +3888,14 @@ function loop() {
       // 圆形背景
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.beginPath();
-      ctx.arc(28, 288, 24, 0, Math.PI * 2);
+      ctx.arc(28, canvas.height * 0.5, 24, 0, Math.PI * 2);
       ctx.fill();
       // 三角形箭头
       ctx.fillStyle = '#333';
       ctx.beginPath();
-      ctx.moveTo(36, 288);
-      ctx.lineTo(16, 274);
-      ctx.lineTo(16, 302);
+      ctx.moveTo(36, canvas.height * 0.5);
+      ctx.lineTo(16, canvas.height * 0.5 - 14);
+      ctx.lineTo(16, canvas.height * 0.5 + 14);
       ctx.closePath();
       ctx.fill();
     }
@@ -3904,13 +3904,13 @@ function loop() {
     if (g.currentScene === 'incubator' && canSwitchToPets) {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.beginPath();
-      ctx.arc(692, 288, 24, 0, Math.PI * 2);
+      ctx.arc(692, canvas.height * 0.5, 24, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#333';
       ctx.beginPath();
-      ctx.moveTo(684, 288);
-      ctx.lineTo(704, 274);
-      ctx.lineTo(704, 302);
+      ctx.moveTo(684, canvas.height * 0.5);
+      ctx.lineTo(704, canvas.height * 0.5 - 14);
+      ctx.lineTo(704, canvas.height * 0.5 + 14);
       ctx.closePath();
       ctx.fill();
     }
