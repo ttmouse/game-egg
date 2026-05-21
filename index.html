@@ -213,6 +213,7 @@ let g = {
   lastTs: Date.now(),
   inventory: { worm: 2, fruit: 1, treat: 0 },
   droppedFood: [],           // 地上的食物 { x, y, type, timer }
+  foodDropCd: 0,             // 扔食物冷却
   eggs: [{ id: 1, temp: 25, hatch: 0, intimacy: 50 }],
   pets: [],
   nextHatchDay: 0,  // 第几天可以孵化下一只
@@ -560,31 +561,25 @@ canvas.addEventListener('click', (e) => {
     return;
   }
 
-  // ─── 点击空地：扔食物（仅宠物间场景，有食物时） ───
-  if (g.currentScene === 'pets' && g.pets.length > 0 && !g.sceneTransition.active) {
-    const totalFood = g.inventory.worm + g.inventory.fruit + g.inventory.treat;
-    if (totalFood > 0) {
-      // 按优先级选择食物：虫子→水果→饲料
-      let foodType = null;
-      if (g.inventory.worm > 0) foodType = 'worm';
-      else if (g.inventory.fruit > 0) foodType = 'fruit';
-      else if (g.inventory.treat > 0) foodType = 'treat';
-      if (foodType) {
-        g.inventory[foodType]--;
-        g.droppedFood.push({
-          x: mx,
-          y: my,
+  // ─── 点击空地：扔食物（3秒冷却） ───
+  if (g.currentScene === 'pets' && g.pets.length > 0 && !g.sceneTransition.active && g.foodDropCd <= 0) {
+    const types = ['worm', 'worm', 'worm', 'fruit', 'treat'];
+    const foodType = types[Math.floor(Math.random() * types.length)];
+    const targetY = Math.max(300, Math.min(500, my));
+    g.droppedFood.push({
+          x: Math.max(80, Math.min(640, mx)),
+          y: targetY,
           type: foodType,
           timer: 60,
-          fallY: -120,    // 从天而降的起始偏移
-          phase: 'fall'   // fall → bounce → idle
+          offY: my - targetY,   // 鼠标点击位置到地面的偏移（负=上方，0=地面）
+          vY: -150,             // 向上初速度（抛射）
+          phase: 'fly'
         });
+        g.foodDropCd = 3;
         initAudio();
         playSound('forage');
         saveGame();
-      }
     }
-  }
 });
 
 // ─── 拖拽系统 ─────────────────────────────────────────────────────
@@ -636,15 +631,23 @@ canvas.addEventListener('mousemove', (e) => {
     const { x, y } = getCanvasCoords(e);
     const petClickRadius = 70;
     let isOverPet = false;
+    g.hoveredPetId = null;
     for (const pet of g.pets) {
       if (!pet.scenePos) continue;
       const dx = x - pet.scenePos.x, dy = y - pet.scenePos.y;
       if (dx * dx + dy * dy <= petClickRadius * petClickRadius) {
         isOverPet = true;
+        g.hoveredPetId = pet.id;
         break;
       }
     }
-    canvas.style.cursor = isOverPet ? 'grab' : 'default';
+    if (isOverPet) {
+      canvas.style.cursor = 'grab';
+    } else if (g.currentScene === 'pets' && g.pets.length > 0) {
+      canvas.style.cursor = g.foodDropCd > 0 ? 'not-allowed' : 'crosshair';
+    } else {
+      canvas.style.cursor = 'default';
+    }
   }
 });
 
@@ -763,6 +766,7 @@ canvas.addEventListener('mouseup', () => {
 });
 
 canvas.addEventListener('mouseleave', () => {
+  g.hoveredPetId = null;
   if (g.draggingPetId !== null) {
     g.draggingPetId = null;
     canvas.style.cursor = 'default';
@@ -1502,16 +1506,24 @@ function drawPet(pet, x, y, options) {
   ctx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale + offsetY + walkBob, 48 * scale, 48 * scale);
   ctx.restore();
 
-  // ─── 撒娇气泡 ───
+  // ─── 撒娇气泡（圆角矩形 + 三角尾巴） ───
   if (moodBubble.show) {
     const bubbleX = basePx + 30, bubbleY = basePy - 45;
+    const bw = 80, bh = 24, r = 8;
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillRect(bubbleX - 40, bubbleY - 16, 80, 24);
-    ctx.fillStyle = '#333';
-    ctx.fillRect(bubbleX - 8, bubbleY + 8, 8, 4);
-    ctx.fillRect(bubbleX, bubbleY + 12, 8, 4);
+    ctx.beginPath();
+    ctx.roundRect(bubbleX - bw/2, bubbleY - bh/2, bw, bh, r);
+    ctx.fill();
+    // 气泡尾巴（小三角）
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(bubbleX - 6, bubbleY + bh/2 - 2);
+    ctx.lineTo(bubbleX, bubbleY + bh/2 + 8);
+    ctx.lineTo(bubbleX + 6, bubbleY + bh/2 - 2);
+    ctx.closePath();
+    ctx.fill();
     const bubbleText = moodBubble.text || '摸摸我~';
-    drawText(bubbleText, bubbleX - 32, bubbleY - 10, '#FF69B4', 1);
+    drawText(bubbleText, bubbleX - bubbleText.length * 4, bubbleY - 6, '#FF69B4', 1);
   }
 
   // ─── 宠物上方标签 ───
@@ -1718,7 +1730,7 @@ function doSynthesize() {
   msg.innerHTML = `<div class="title">⚗️ 宠物合成</div>
     <div style="color:#aaa;font-size:12px;margin-bottom:4px">选择3只<b style="color:#FFD700">同星级</b>宠物合成1只<b style="color:#FFD700">+1星</b>宠物</div>
     <div style="color:#666;font-size:11px;margin-bottom:8px">可选：${starHint} &nbsp; <span style="color:#f55">副宠物将被消耗</span></div>
-    <div id="breed_list" style="max-height:300px;overflow-y:auto">${listHtml}</div>
+    <div id="breed_list" style="max-height:60vh;overflow-y:auto">${listHtml}</div>
     <div id="breed_error" style="color:#f55;font-size:12px;margin-top:6px;display:none">请选择3只同星级的宠物</div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button onclick="confirmSynth()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">合成</button>
@@ -1966,6 +1978,7 @@ function update(dt) {
 
   // 地面食物计时
   updateDroppedFood(dt);
+  if (g.foodDropCd > 0) g.foodDropCd = Math.max(0, g.foodDropCd - dt);
 
   // Cooldowns
   if (g.petCdLeft > 0) g.petCdLeft = Math.max(0, g.petCdLeft - dt);
@@ -2106,10 +2119,11 @@ function updatePetWander(dt) {
   g.pets.forEach(pet => {
     if (!pet.scenePos) return;
     if (g.draggingPetId === pet.id) return;
+    if (g.hoveredPetId === pet.id) return; // 悬停时暂停移动
     if (pet.interactAnim && pet.interactAnim.time > 0) return;
 
-    // 优先寻路捡食
-    if (seekFood(pet, dt)) return;
+    // 优先寻路捡食（只设目标，不跳转）
+    seekFood(pet);
 
     pet.wanderTimer -= dt;
 
@@ -3274,9 +3288,9 @@ function drawDroppedFood() {
   g.droppedFood.forEach(f => {
     const alpha = Math.min(1, f.timer / 10);
     ctx.globalAlpha = alpha;
-    const drawY = f.y + Math.max(0, f.fallY); // 下落偏移只影响视觉Y
-    // 食物阴影（落地后才显示）
-    if (f.phase !== 'fall') {
+    const drawY = f.y + f.offY; // offY 负=空中，正=弹起，0=地面
+    // 食物阴影（贴近地面时显示）
+    if (f.offY > -10) {
       ctx.fillStyle = 'rgba(0,0,0,0.2)';
       ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
     }
@@ -3288,45 +3302,47 @@ function drawDroppedFood() {
 }
 
 // ─── 宠物寻路捡食 ───────────────────────────────────────────────
-function seekFood(pet, dt) {
-  if (g.droppedFood.length === 0) return false;
-  if (pet.interactAnim && pet.interactAnim.time > 0) return false;
+function seekFood(pet) {
+  if (g.droppedFood.length === 0) return;
+  if (pet.interactAnim && pet.interactAnim.time > 0) return;
 
-  // 找到最近的食物
+  // 找最近的未被其他宠物认领的食物（自己认领过的可以继续）
   let nearest = null, nearDist = Infinity;
   g.droppedFood.forEach(f => {
+    if (f.claimedBy !== undefined && f.claimedBy !== pet.id) return;
     const dx = f.x - pet.scenePos.x;
     const dy = f.y - pet.scenePos.y;
     const d = dx * dx + dy * dy;
-    if (d < nearDist) {
-      nearDist = d;
-      nearest = f;
-    }
+    if (d < nearDist) { nearDist = d; nearest = f; }
   });
-  if (!nearest) return false;
+  if (!nearest) return;
 
   const dist = Math.sqrt(nearDist);
   if (dist < 20) {
-    // 吃到了！
     const foodType = nearest.type;
     const gains = { worm: 15, fruit: 25, treat: 40 };
     g.hunger = Math.min(100, g.hunger + (gains[foodType] || 15));
+    // 吃东西也涨孵化进度和亲密度
+    const hatchGains = { worm: 0.5, fruit: 1, treat: 2 };
+    g.hatchPct = Math.min(100, g.hatchPct + (hatchGains[foodType] || 0));
+    g.intimacy = Math.min(100, g.intimacy + (foodType === 'treat' ? 3 : foodType === 'fruit' ? 2 : 1));
     g.droppedFood = g.droppedFood.filter(f => f !== nearest);
-    // 吃到的动画效果
     pet.clickReaction = { type: 'heart', time: 0 };
-    // 文字反馈
     showToast(`${pet.name} 吃了${foodType === 'worm' ? '虫子' : foodType === 'fruit' ? '水果' : '饲料'}！`);
+    pet.wanderTarget = null;
+    pet.wanderIdle = 1 + Math.random() * 2;
+    pet.wanderTimer = pet.wanderIdle;
     saveGame();
-    return true;
+    return;
   }
 
-  // 走向食物——覆盖游走目标
+  // 认领该食物（用宠物ID标记，自己可见、其他宠物不可见）
+  nearest.claimedBy = pet.id;
   pet.wanderTarget = { x: nearest.x, y: nearest.y };
   pet.wanderSpeed = 1.2;
-  // 面向食物
+  pet.wanderTimer = 999;
   if (nearest.x < pet.scenePos.x) pet.facingRight = false;
   else pet.facingRight = true;
-  return true;
 }
 
 // ─── 地面食物更新 ───────────────────────────────────────────────
@@ -3334,24 +3350,33 @@ function updateDroppedFood(dt) {
   g.droppedFood = g.droppedFood.filter(f => {
     f.timer -= dt;
 
-    // 下落弹跳动画
-    if (f.phase === 'fall') {
-      f.fallY += dt * 400; // 加速下落
-      if (f.fallY >= 0) {
-        f.fallY = 0;
-        f.phase = 'bounce';
-        f.bounceV = -30; // 弹起速度
+    // 被认领但 timer 快到了还无人吃掉 → 释放让其他宠物尝试
+    if (f.claimedBy !== undefined && f.timer < 50) {
+      // 检查是否有宠物还在走向它
+      const hasClaimer = g.pets.some(p =>
+        p.wanderTarget &&
+        Math.abs(p.wanderTarget.x - f.x) < 5 &&
+        Math.abs(p.wanderTarget.y - f.y) < 5
+      );
+      if (!hasClaimer) f.claimed = false;
+    }
+
+    // 抛射 + 弹跳动画
+    if (f.phase === 'fly') {
+      f.offY += f.vY * dt;
+      f.vY += 400 * dt; // 重力
+      if (f.offY >= 0) { // 落到地面
+        f.offY = 0;
+        f.vY = -f.vY * 0.35;
+        f.phase = Math.abs(f.vY) < 15 ? 'idle' : 'bounce';
       }
     } else if (f.phase === 'bounce') {
-      f.fallY += f.bounceV * dt * 4;
-      f.bounceV += 120 * dt; // 重力
-      if (f.fallY >= 0) {
-        f.fallY = 0;
-        f.bounceV = -f.bounceV * 0.4; // 衰减
-        if (Math.abs(f.bounceV) < 10) {
-          f.fallY = 0;
-          f.phase = 'idle';
-        }
+      f.offY += f.vY * dt;
+      f.vY += 400 * dt;
+      if (f.offY >= 0) {
+        f.offY = 0;
+        f.vY = -f.vY * 0.35;
+        if (Math.abs(f.vY) < 15) { f.vY = 0; f.phase = 'idle'; }
       }
     }
 
@@ -3581,16 +3606,23 @@ function drawPetToCtx(targetCtx, pet, x, y, options) {
   targetCtx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale + offsetY + walkBob, 48 * scale, 48 * scale);
   targetCtx.restore();
 
-  // ─── 撒娇气泡 ───
+  // ─── 撒娇气泡（圆角矩形 + 三角尾巴） ───
   if (moodBubble.show) {
     const bubbleX = basePx + 30, bubbleY = basePy - 45;
+    const bw = 80, bh = 24, r = 8;
     targetCtx.fillStyle = 'rgba(255,255,255,0.9)';
-    targetCtx.fillRect(bubbleX - 40, bubbleY - 16, 80, 24);
-    targetCtx.fillStyle = '#333';
-    targetCtx.fillRect(bubbleX - 8, bubbleY + 8, 8, 4);
-    targetCtx.fillRect(bubbleX, bubbleY + 12, 8, 4);
+    targetCtx.beginPath();
+    targetCtx.roundRect(bubbleX - bw/2, bubbleY - bh/2, bw, bh, r);
+    targetCtx.fill();
+    targetCtx.fillStyle = 'rgba(255,255,255,0.9)';
+    targetCtx.beginPath();
+    targetCtx.moveTo(bubbleX - 6, bubbleY + bh/2 - 2);
+    targetCtx.lineTo(bubbleX, bubbleY + bh/2 + 8);
+    targetCtx.lineTo(bubbleX + 6, bubbleY + bh/2 - 2);
+    targetCtx.closePath();
+    targetCtx.fill();
     const bubbleText = moodBubble.text || '摸摸我~';
-    drawTextToCtx(targetCtx, bubbleX - 32, bubbleY - 10, bubbleText, '#FF69B4', 1);
+    drawTextToCtx(targetCtx, bubbleX - bubbleText.length * 4, bubbleY - 6, bubbleText, '#FF69B4', 1);
   }
 
   // ─── 宠物上方标签（名字、星级、基因、等级） ───
