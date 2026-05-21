@@ -199,6 +199,14 @@ let g = {
   currentPet: null,  // 当前显示的宠物
   currentScene: 'incubator', // 'incubator' | 'pets'
   sceneTransition: { active: false, progress: 0, from: 'incubator', to: 'pets' },
+
+  // ─── 宠物互动增强（全局状态） ───
+  heartParticles: [],       // 爱心粒子特效（全局共享）
+
+  // ─── 拖拽系统 ───
+  draggingPetId: null,     // 当前正在拖拽的宠物ID
+  dragOffsetX: 0,          // 拖拽偏移X
+  dragOffsetY: 0,          // 拖拽偏移Y
 };
 
 // ─── Sound System ────────────────────────────────────────────────
@@ -395,13 +403,73 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
-// 画布点击检测（宠物列表 + 场景切换）
+// 画布点击检测（宠物列表 + 场景切换 + 宠物点击）
 canvas.addEventListener('click', (e) => {
   const rect = canvas.getBoundingClientRect();
   const scaleX = 720 / rect.width;
   const scaleY = 576 / rect.height;
   const mx = (e.clientX - rect.left) * scaleX;
   const my = (e.clientY - rect.top) * scaleY;
+
+  // ─── 宠物点击检测（支持多宠物） ───
+  if (!g.sceneTransition.active && g.draggingPetId === null) {
+    const petClickRadius = 70;
+    let clickedPet = null;
+    let clickedPetPos = null;
+
+    // 遍历所有宠物检测点击
+    for (const pet of g.pets) {
+      if (!pet.scenePos) continue;
+      const dx = mx - pet.scenePos.x;
+      const dy = my - pet.scenePos.y;
+      if (dx * dx + dy * dy <= petClickRadius * petClickRadius) {
+        clickedPet = pet;
+        clickedPetPos = pet.scenePos;
+        break;
+      }
+    }
+
+    if (clickedPet) {
+      // 点击了宠物！触发互动
+      initAudio();
+      playSound('pet');
+
+      // 增加亲密度
+      g.intimacy = Math.min(100, g.intimacy + 3);
+      g.lastInteractTime = Date.now();
+      g.idleTime = 0;
+
+      // 随机触发特效（设置在该宠物身上）
+      const reactions = ['jump', 'heart', 'spin', 'bounce'];
+      clickedPet.clickReaction = {
+        type: reactions[Math.floor(Math.random() * reactions.length)],
+        time: 0
+      };
+
+      // 发射爱心粒子（从宠物当前位置）
+      for (let i = 0; i < 5; i++) {
+        g.heartParticles.push({
+          x: clickedPetPos.x + (Math.random() - 0.5) * 40,
+          y: clickedPetPos.y - 20 + (Math.random() - 0.5) * 40,
+          vx: (Math.random() - 0.5) * 2,
+          vy: -Math.random() * 2 - 1,
+          life: 1,
+          size: 4 + Math.random() * 4
+        });
+      }
+
+      // 短暂显示开心表情（设置在该宠物身上）
+      clickedPet.petMood = 'happy';
+      clickedPet.moodBubble = { show: true, timer: 2 };
+
+      // 给予经验
+      addExp(clickedPet, 3);
+
+      updateBtnUI();
+      saveGame();
+      return;
+    }
+  }
 
   // 场景切换按钮区域（左右两侧大箭头）
   // 左箭头：x: 0-40, y: 200-380
@@ -413,8 +481,8 @@ canvas.addEventListener('click', (e) => {
     }
     return;
   }
-  // 右箭头：x: 680-720, y: 200-380
-  if (g.currentScene === 'incubator' && g.currentPet && mx >= 670 && mx <= 720 && my >= 200 && my <= 380) {
+  // 右箭头：x: 680-720, y: 200-380（切换到宠物间）
+  if (g.currentScene === 'incubator' && g.pets.length > 0 && mx >= 670 && mx <= 720 && my >= 200 && my <= 380) {
     if (!g.sceneTransition.active) {
       initAudio();
       playSound('sceneSwitch');
@@ -429,6 +497,522 @@ canvas.addEventListener('click', (e) => {
       showPetDetail(r.idx);
       return;
     }
+  }
+});
+
+// ─── 拖拽系统 ─────────────────────────────────────────────────────
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = 720 / rect.width;
+  const scaleY = 576 / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY
+  };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  if (g.sceneTransition.active) return;
+  const { x, y } = getCanvasCoords(e);
+
+  // 检测是否点击了宠物（支持多宠物）
+  const petClickRadius = 70;
+  for (const pet of g.pets) {
+    if (!pet.scenePos) continue;
+    const dx = x - pet.scenePos.x, dy = y - pet.scenePos.y;
+    if (dx * dx + dy * dy <= petClickRadius * petClickRadius) {
+      g.draggingPetId = pet.id;
+      g.dragOffsetX = dx;
+      g.dragOffsetY = dy;
+      canvas.style.cursor = 'grabbing';
+      break;
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (g.draggingPetId !== null) {
+    // 拖拽中：更新宠物位置
+    const { x, y } = getCanvasCoords(e);
+    const pet = g.pets.find(p => p.id === g.draggingPetId);
+    if (pet && pet.scenePos) {
+      pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
+      pet.scenePos.y = Math.max(40, Math.min(480, y - g.dragOffsetY));
+    }
+    return;
+  }
+
+  // 鼠标悬停检测
+  if (!g.sceneTransition.active) {
+    const { x, y } = getCanvasCoords(e);
+    const petClickRadius = 70;
+    let isOverPet = false;
+    for (const pet of g.pets) {
+      if (!pet.scenePos) continue;
+      const dx = x - pet.scenePos.x, dy = y - pet.scenePos.y;
+      if (dx * dx + dy * dy <= petClickRadius * petClickRadius) {
+        isOverPet = true;
+        break;
+      }
+    }
+    canvas.style.cursor = isOverPet ? 'grab' : 'default';
+  }
+});
+
+// ─── Isometric Grid System ────────────────────────────────────────
+// 等轴测 45 度俯视角，2:1 菱形格子
+const ISO_COLS = 5, ISO_ROWS = 3;
+const TILE_W = 80, TILE_H = 40;
+const OX = 360, OY = 100; // 屏幕原点（网格最上端中心）
+
+// 网格 (col, row) → 屏幕 (x, y)：tile 中心点
+function isoToScreen(col, row) {
+  return {
+    x: (col - row) * (TILE_W / 2) + OX,
+    y: (col + row) * (TILE_H / 2) + OY,
+  };
+}
+
+// 屏幕 (x, y) → 网格 (col, row)
+function screenToIso(sx, sy) {
+  const x = sx - OX;
+  const y = sy - OY;
+  const col = Math.round((x / (TILE_W / 2) + y / (TILE_H / 2)) / 2);
+  const row = Math.round((y / (TILE_H / 2) - x / (TILE_W / 2)) / 2);
+  return { col, row };
+}
+
+// 按深度排序（col+row 越小越靠前，先画）
+function isoDepth(col, row) {
+  return col + row;
+}
+
+// ─── 等轴测地面（连续平面，无独立 tile 边界） ───
+// 5×3 网格背面 = y≈100，网格正面 = y=220；向下延伸到 canvas 底 y=576
+function drawIsoGround() {
+  const isDay = g.isDay;
+  const t = Date.now();
+
+  // 计算网格边界点
+  const backLeft  = isoToScreen(0, 0);          // (0,0) tile 中心
+  const backRight = isoToScreen(ISO_COLS - 1, 0); // (4,0) tile 中心
+  const frontLeft  = isoToScreen(0, ISO_ROWS - 1); // (0,2) tile 中心
+  const frontRight = isoToScreen(ISO_COLS - 1, ISO_ROWS - 1); // (4,2) tile 中心
+
+  // 顶面（连续等轴测地面，用多层渐变模拟深度）
+  if (isDay) {
+    // 最深色（网格外侧/背面）
+    ctx.fillStyle = '#2d6b27';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x, backLeft.y);
+    ctx.lineTo(backRight.x, backRight.y);
+    ctx.lineTo(frontRight.x + 80, frontRight.y + 40);
+    ctx.lineTo(backLeft.x - 80, backLeft.y + 40);
+    ctx.closePath();
+    ctx.fill();
+
+    // 中间色
+    ctx.fillStyle = '#3d8b37';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x - 10, backLeft.y + 15);
+    ctx.lineTo(backRight.x + 10, backRight.y + 15);
+    ctx.lineTo(frontRight.x + 60, frontRight.y + 50);
+    ctx.lineTo(backLeft.x - 60, backLeft.y + 50);
+    ctx.closePath();
+    ctx.fill();
+
+    // 近景/最亮
+    ctx.fillStyle = '#4a9e42';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x - 30, backLeft.y + 35);
+    ctx.lineTo(backRight.x + 30, backRight.y + 35);
+    ctx.lineTo(frontRight.x + 40, frontRight.y + 60);
+    ctx.lineTo(backLeft.x - 40, backLeft.y + 60);
+    ctx.closePath();
+    ctx.fill();
+
+    // ── 像素地面纹理：随机草叶/深浅斑块 ──────────────────────────
+    // 在地面 diamond 区域内散布深色草块、浅色高光、小石子
+    // 使用固定种子伪随机，确保每次运行一致
+    const texDetails = [
+      // [x, y, w, h, color, type]  type: 0=深草块, 1=浅高光, 2=石子
+      [295,118,4,3,'#1f5019',0],[320,130,6,3,'#1a4515',0],[355,112,5,4,'#236020',0],
+      [390,118,3,3,'#1f5019',0],[415,125,4,2,'#1a4515',0],[430,115,5,3,'#236020',0],
+      [305,145,4,3,'#1a4515',0],[340,150,5,4,'#236020',0],[375,140,4,3,'#1f5019',0],
+      [410,148,6,3,'#1a4515',0],[445,142,4,3,'#236020',0],[300,165,3,3,'#1f5019',0],
+      [330,170,5,3,'#2a6024',0],[365,160,4,4,'#1a4515',0],[400,168,5,3,'#236020',0],
+      [435,162,4,3,'#1f5019',0],[460,158,3,3,'#1a4515',0],[305,185,4,3,'#236020',0],
+      [340,190,5,4,'#1f5019',0],[375,182,4,3,'#2a6024',0],[410,188,5,3,'#1a4515',0],
+      [445,184,4,3,'#236020',0],[295,205,3,3,'#1f5019',0],[325,210,5,3,'#236020',0],
+      [360,202,4,4,'#1a4515',0],[395,208,5,3,'#2a6024',0],[430,205,4,3,'#1f5019',0],
+      [465,200,3,3,'#1a4515',0],[310,225,4,3,'#236020',0],[345,228,5,3,'#1f5019',0],
+      [380,220,4,3,'#2a6024',0],[415,226,5,4,'#1a4515',0],[450,222,4,3,'#236020',0],
+      [475,215,3,3,'#1f5019',0],[320,248,3,3,'#1a4515',0],[355,252,4,3,'#236020',0],
+      [390,245,3,3,'#1f5019',0],[425,250,4,3,'#2a6024',0],[460,248,3,3,'#1a4515',0],
+      // 浅色高光
+      [310,125,3,2,'#5ab34e',1],[350,118,4,2,'#68c255',1],[400,122,3,2,'#5ab34e',1],
+      [330,155,3,2,'#68c255',1],[370,148,4,2,'#5ab34e',1],[415,152,3,2,'#68c255',1],
+      [345,178,3,2,'#5ab34e',1],[385,170,4,2,'#68c255',1],[430,175,3,2,'#5ab34e',1],
+      [360,200,3,2,'#68c255',1],[400,195,4,2,'#5ab34e',1],[440,198,3,2,'#68c255',1],
+      [375,222,3,2,'#5ab34e',1],[415,218,4,2,'#68c255',1],[455,225,3,2,'#5ab34e',1],
+      // 石子/硬地
+      [338,138,2,2,'#8a7a5a',2],[418,135,2,2,'#7a6a4a',2],[358,168,2,2,'#8a7a5a',2],
+      [428,178,2,2,'#7a6a4a',2],[310,190,2,2,'#8a7a5a',2],[445,200,2,2,'#7a6a4a',2],
+      [335,215,2,2,'#8a7a5a',2],[425,210,2,2,'#7a6a4a',2],[365,240,2,2,'#8a7a5a',2],
+      [440,235,2,2,'#7a6a4a',2],[310,258,2,2,'#8a7a5a',2],[455,255,2,2,'#7a6a4a',2],
+    ];
+    texDetails.forEach(([x,y,w,h,c]) => {
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, w, h);
+    });
+  } else {
+    // Night: 暗色整体地面
+    ctx.fillStyle = '#1a3d1a';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x, backLeft.y);
+    ctx.lineTo(backRight.x, backRight.y);
+    ctx.lineTo(frontRight.x + 80, frontRight.y + 40);
+    ctx.lineTo(backLeft.x - 80, backLeft.y + 40);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#1f4a1f';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x - 20, backLeft.y + 20);
+    ctx.lineTo(backRight.x + 20, backRight.y + 20);
+    ctx.lineTo(frontRight.x + 50, frontRight.y + 55);
+    ctx.lineTo(backLeft.x - 50, backLeft.y + 55);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 地面正面厚度（左侧+右侧暗面，给立体感）
+  const tileDepth = 16;
+  if (isDay) {
+    // 左侧面
+    ctx.fillStyle = '#1f5019';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x - 80, backLeft.y + 40);
+    ctx.lineTo(backLeft.x, backLeft.y + 40);
+    ctx.lineTo(frontLeft.x, frontLeft.y + tileDepth + 40);
+    ctx.lineTo(backLeft.x - 80, backLeft.y + tileDepth + 40);
+    ctx.closePath();
+    ctx.fill();
+    // 右侧面
+    ctx.fillStyle = '#2a6024';
+    ctx.beginPath();
+    ctx.moveTo(backRight.x, backRight.y + 40);
+    ctx.lineTo(backRight.x + 80, backRight.y + 40);
+    ctx.lineTo(frontRight.x + 80, frontRight.y + tileDepth + 40);
+    ctx.lineTo(backRight.x, frontRight.y + tileDepth + 40);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillStyle = '#0d150d';
+    ctx.beginPath();
+    ctx.moveTo(backLeft.x - 80, backLeft.y + 40);
+    ctx.lineTo(backLeft.x, backLeft.y + 40);
+    ctx.lineTo(frontLeft.x, frontLeft.y + tileDepth + 40);
+    ctx.lineTo(backLeft.x - 80, backLeft.y + tileDepth + 40);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 前缘草皮（高度变化 + 花朵装饰）
+  // 草色：白天三层（暗/中/亮），夜晚一层
+  if (isDay) {
+    ctx.fillStyle = '#1a5019';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 3;
+      const gy = frontLeft.y + 62;
+      const h = 4 + (i % 3) * 2; // 4/6/8px 高低交替
+      ctx.fillRect(gx, gy, 2, h);
+    }
+    ctx.fillStyle = '#2a7030';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 8;
+      const gy = frontLeft.y + 60;
+      const h = 5 + (i % 4) * 2; // 5/7/9/11px
+      ctx.fillRect(gx, gy, 2, h);
+    }
+    ctx.fillStyle = '#32CD32';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 58;
+      const h = 6 + (i % 5) * 2; // 6/8/10/12/14px
+      ctx.fillRect(gx, gy, 2, h);
+    }
+    // 草丛底部阴影（深度感）
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 72;
+      ctx.fillRect(gx, gy, 2, 3);
+    }
+    // 野花装饰
+    const flowerColors = ['#FF6B6B','#FFE66D','#C8F0FF','#FFB3D9','#FFFFFF'];
+    for (let i = 0; i < 18; i++) {
+      const fx = i * 40 + 10 + (i % 3) * 8;
+      const fy = frontLeft.y + 60 + (i % 4) * 2;
+      ctx.fillStyle = flowerColors[i % flowerColors.length];
+      ctx.fillRect(fx, fy, 2, 2);
+      ctx.fillRect(fx - 1, fy + 1, 1, 1);
+      ctx.fillRect(fx + 2, fy + 1, 1, 1);
+    }
+    // 偶尔的小石头
+    ctx.fillStyle = '#7a6a5a';
+    for (let i = 0; i < 10; i++) {
+      const sx = i * 72 + 20;
+      const sy = frontLeft.y + 70;
+      ctx.fillRect(sx, sy, 3, 2);
+    }
+  } else {
+    // 夜晚草（暗色，低矮）
+    ctx.fillStyle = '#1a3d1a';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 62;
+      const h = 3 + (i % 3) * 2;
+      ctx.fillRect(gx, gy, 2, h);
+    }
+    ctx.fillStyle = '#1f4a1f';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 8;
+      const gy = frontLeft.y + 60;
+      const h = 4 + (i % 4) * 2;
+      ctx.fillRect(gx, gy, 2, h);
+    }
+  }
+}
+
+// ─── 宠物场景等轴测地面（绘制到指定 ctx） ───
+function drawIsoGroundToCtx(targetCtx) {
+  const isDay = g.isDay;
+
+  const backLeft  = isoToScreen(0, 0);
+  const backRight = isoToScreen(ISO_COLS - 1, 0);
+  const frontLeft  = isoToScreen(0, ISO_ROWS - 1);
+  const frontRight = isoToScreen(ISO_COLS - 1, ISO_ROWS - 1);
+
+  if (isDay) {
+    targetCtx.fillStyle = '#2d6b27';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x, backLeft.y);
+    targetCtx.lineTo(backRight.x, backRight.y);
+    targetCtx.lineTo(frontRight.x + 80, frontRight.y + 40);
+    targetCtx.lineTo(backLeft.x - 80, backLeft.y + 40);
+    targetCtx.closePath();
+    targetCtx.fill();
+
+    targetCtx.fillStyle = '#3d8b37';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x - 10, backLeft.y + 15);
+    targetCtx.lineTo(backRight.x + 10, backRight.y + 15);
+    targetCtx.lineTo(frontRight.x + 60, frontRight.y + 50);
+    targetCtx.lineTo(backLeft.x - 60, backLeft.y + 50);
+    targetCtx.closePath();
+    targetCtx.fill();
+
+    targetCtx.fillStyle = '#4a9e42';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x - 30, backLeft.y + 35);
+    targetCtx.lineTo(backRight.x + 30, backRight.y + 35);
+    targetCtx.lineTo(frontRight.x + 40, frontRight.y + 60);
+    targetCtx.lineTo(backLeft.x - 40, backLeft.y + 60);
+    targetCtx.closePath();
+    targetCtx.fill();
+
+    // ── 像素地面纹理（宠物场景） ────────────────────────────────
+    const texDetails2 = [
+      [295,118,4,3,'#1f5019'],[320,130,6,3,'#1a4515'],[355,112,5,4,'#236020'],
+      [390,118,3,3,'#1f5019'],[415,125,4,2,'#1a4515'],[430,115,5,3,'#236020'],
+      [305,145,4,3,'#1a4515'],[340,150,5,4,'#236020'],[375,140,4,3,'#1f5019'],
+      [410,148,6,3,'#1a4515'],[445,142,4,3,'#236020'],[300,165,3,3,'#1f5019'],
+      [330,170,5,3,'#2a6024'],[365,160,4,4,'#1a4515'],[400,168,5,3,'#236020'],
+      [435,162,4,3,'#1f5019'],[460,158,3,3,'#1a4515'],[305,185,4,3,'#236020'],
+      [340,190,5,4,'#1f5019'],[375,182,4,3,'#2a6024'],[410,188,5,3,'#1a4515'],
+      [445,184,4,3,'#236020'],[295,205,3,3,'#1f5019'],[325,210,5,3,'#236020'],
+      [360,202,4,4,'#1a4515'],[395,208,5,3,'#2a6024'],[430,205,4,3,'#1f5019'],
+      [465,200,3,3,'#1a4515'],[310,225,4,3,'#236020'],[345,228,5,3,'#1f5019'],
+      [380,220,4,3,'#2a6024'],[415,226,5,4,'#1a4515'],[450,222,4,3,'#236020'],
+      [475,215,3,3,'#1f5019'],[320,248,3,3,'#1a4515'],[355,252,4,3,'#236020'],
+      [390,245,3,3,'#1f5019'],[425,250,4,3,'#2a6024'],[460,248,3,3,'#1a4515'],
+      [310,125,3,2,'#5ab34e'],[350,118,4,2,'#68c255'],[400,122,3,2,'#5ab34e'],
+      [330,155,3,2,'#68c255'],[370,148,4,2,'#5ab34e'],[415,152,3,2,'#68c255'],
+      [345,178,3,2,'#5ab34e'],[385,170,4,2,'#68c255'],[430,175,3,2,'#5ab34e'],
+      [360,200,3,2,'#68c255'],[400,195,4,2,'#5ab34e'],[440,198,3,2,'#68c255'],
+      [375,222,3,2,'#5ab34e'],[415,218,4,2,'#68c255'],[455,225,3,2,'#5ab34e'],
+      [338,138,2,2,'#8a7a5a'],[418,135,2,2,'#7a6a4a'],[358,168,2,2,'#8a7a5a'],
+      [428,178,2,2,'#7a6a4a'],[310,190,2,2,'#8a7a5a'],[445,200,2,2,'#7a6a4a'],
+      [335,215,2,2,'#8a7a5a'],[425,210,2,2,'#7a6a4a'],[365,240,2,2,'#8a7a5a'],
+      [440,235,2,2,'#7a6a4a'],[310,258,2,2,'#8a7a5a'],[455,255,2,2,'#7a6a4a'],
+    ];
+    texDetails2.forEach(([x,y,w,h,c]) => {
+      targetCtx.fillStyle = c;
+      targetCtx.fillRect(x, y, w, h);
+    });
+  } else {
+    targetCtx.fillStyle = '#1a3d1a';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x, backLeft.y);
+    targetCtx.lineTo(backRight.x, backRight.y);
+    targetCtx.lineTo(frontRight.x + 80, frontRight.y + 40);
+    targetCtx.lineTo(backLeft.x - 80, backLeft.y + 40);
+    targetCtx.closePath();
+    targetCtx.fill();
+
+    targetCtx.fillStyle = '#1f4a1f';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x - 20, backLeft.y + 20);
+    targetCtx.lineTo(backRight.x + 20, backRight.y + 20);
+    targetCtx.lineTo(frontRight.x + 50, frontRight.y + 55);
+    targetCtx.lineTo(backLeft.x - 50, backLeft.y + 55);
+    targetCtx.closePath();
+    targetCtx.fill();
+  }
+
+  // 地面正面厚度
+  const tileDepth = 16;
+  if (isDay) {
+    targetCtx.fillStyle = '#1f5019';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x - 80, backLeft.y + 40);
+    targetCtx.lineTo(backLeft.x, backLeft.y + 40);
+    targetCtx.lineTo(frontLeft.x, frontLeft.y + tileDepth + 40);
+    targetCtx.lineTo(backLeft.x - 80, backLeft.y + tileDepth + 40);
+    targetCtx.closePath();
+    targetCtx.fill();
+    targetCtx.fillStyle = '#2a6024';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backRight.x, backRight.y + 40);
+    targetCtx.lineTo(backRight.x + 80, backRight.y + 40);
+    targetCtx.lineTo(frontRight.x + 80, frontRight.y + tileDepth + 40);
+    targetCtx.lineTo(backRight.x, frontRight.y + tileDepth + 40);
+    targetCtx.closePath();
+    targetCtx.fill();
+  } else {
+    targetCtx.fillStyle = '#0d150d';
+    targetCtx.beginPath();
+    targetCtx.moveTo(backLeft.x - 80, backLeft.y + 40);
+    targetCtx.lineTo(backLeft.x, backLeft.y + 40);
+    targetCtx.lineTo(frontLeft.x, frontLeft.y + tileDepth + 40);
+    targetCtx.lineTo(backLeft.x - 80, backLeft.y + tileDepth + 40);
+    targetCtx.closePath();
+    targetCtx.fill();
+  }
+
+  // 前缘草皮（宠物场景，高度变化 + 花朵装饰）
+  if (isDay) {
+    targetCtx.fillStyle = '#1a5019';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 3;
+      const gy = frontLeft.y + 62;
+      const h = 4 + (i % 3) * 2;
+      targetCtx.fillRect(gx, gy, 2, h);
+    }
+    targetCtx.fillStyle = '#2a7030';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 8;
+      const gy = frontLeft.y + 60;
+      const h = 5 + (i % 4) * 2;
+      targetCtx.fillRect(gx, gy, 2, h);
+    }
+    targetCtx.fillStyle = '#32CD32';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 58;
+      const h = 6 + (i % 5) * 2;
+      targetCtx.fillRect(gx, gy, 2, h);
+    }
+    targetCtx.fillStyle = 'rgba(0,0,0,0.15)';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 72;
+      targetCtx.fillRect(gx, gy, 2, 3);
+    }
+    const flowerColors2 = ['#FF6B6B','#FFE66D','#C8F0FF','#FFB3D9','#FFFFFF'];
+    for (let i = 0; i < 18; i++) {
+      const fx = i * 40 + 10 + (i % 3) * 8;
+      const fy = frontLeft.y + 60 + (i % 4) * 2;
+      targetCtx.fillStyle = flowerColors2[i % flowerColors2.length];
+      targetCtx.fillRect(fx, fy, 2, 2);
+      targetCtx.fillRect(fx - 1, fy + 1, 1, 1);
+      targetCtx.fillRect(fx + 2, fy + 1, 1, 1);
+    }
+    targetCtx.fillStyle = '#7a6a5a';
+    for (let i = 0; i < 10; i++) {
+      const sx = i * 72 + 20;
+      const sy = frontLeft.y + 70;
+      targetCtx.fillRect(sx, sy, 3, 2);
+    }
+  } else {
+    targetCtx.fillStyle = '#1a3d1a';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 5;
+      const gy = frontLeft.y + 62;
+      const h = 3 + (i % 3) * 2;
+      targetCtx.fillRect(gx, gy, 2, h);
+    }
+    targetCtx.fillStyle = '#1f4a1f';
+    for (let i = 0; i < 60; i++) {
+      const gx = i * 12 + 8;
+      const gy = frontLeft.y + 60;
+      const h = 4 + (i % 4) * 2;
+      targetCtx.fillRect(gx, gy, 2, h);
+    }
+  }
+}
+
+// ─── 等轴测网格排列 ───
+// 5×3 格子，最多 15 个位置，宠物的 isoCol/isoRow 决定其格子
+function arrangePetsIso() {
+  g.pets.forEach((pet, idx) => {
+    if (!pet.scenePos) pet.scenePos = { x: 0, y: 0 };
+    const col = idx % ISO_COLS;
+    const row = Math.floor(idx / ISO_COLS);
+    const pos = isoToScreen(col, row);
+    pet.scenePos.x = pos.x;
+    pet.scenePos.y = pos.y;
+    pet.isoCol = col;
+    pet.isoRow = row;
+  });
+}
+
+// ─── 等轴测坐标吸附 ───
+function snapPetToIsoGrid(pet) {
+  if (!pet || !pet.scenePos) return;
+  const { col, row } = screenToIso(pet.scenePos.x, pet.scenePos.y);
+  const clampedCol = Math.max(0, Math.min(ISO_COLS - 1, col));
+  const clampedRow = Math.max(0, Math.min(ISO_ROWS - 1, row));
+  const pos = isoToScreen(clampedCol, clampedRow);
+  pet.scenePos.x = pos.x;
+  pet.scenePos.y = pos.y;
+  pet.isoCol = clampedCol;
+  pet.isoRow = clampedRow;
+}
+
+// ─── 宠物网格吸附系统 ───────────────────────────────────────────────
+// 已由 isometric 系统替代（arrangePetsIso + snapPetToIsoGrid）
+
+canvas.addEventListener('mouseup', () => {
+  if (g.draggingPetId !== null) {
+    const pet = g.pets.find(p => p.id === g.draggingPetId);
+    if (pet) {
+      // 触发轻微的弹跳效果
+      pet.clickReaction = { type: 'bounce', time: 0 };
+      // 拖拽结束后吸附到最近网格点
+      snapPetToIsoGrid(pet);
+    }
+    g.draggingPetId = null;
+    canvas.style.cursor = 'default';
+    saveGame();
+  }
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (g.draggingPetId !== null) {
+    g.draggingPetId = null;
+    canvas.style.cursor = 'default';
   }
 });
 
@@ -792,10 +1376,11 @@ const PIXEL_FONT = {
 };
 
 function drawText(text, x, y, color, scale = 1) {
+  if (text == null) return; // 防止 null/undefined 崩溃
   // 强制使用整数坐标避免亚像素模糊
   let cx = Math.floor(x);
   const iy = Math.floor(y);
-  const hasCJK = /[^\x00-\x7E]/.test(text);
+  const hasCJK = /[^\x00-\x7E]/.test(String(text));
 
   if (hasCJK) {
     // CJK文字
@@ -838,166 +1423,94 @@ function drawBg() {
   const t = Date.now();
 
   // ─── Sky gradient ───────────────────────────────────────
-  // 天空从上到下渐变，更有深度感
   if (isDay) {
-    // 白天：从深蓝到浅蓝到橙黄地平线
-    ctx.fillStyle = '#4A90D9';
-    ctx.fillRect(0, 0, 720, 120);
-    ctx.fillStyle = '#87CEEB';
-    ctx.fillRect(0, 120, 720, 100);
-    ctx.fillStyle = '#B8E0F0';
-    ctx.fillRect(0, 220, 720, 80);
-    ctx.fillStyle = '#FFEFD5';
-    ctx.fillRect(0, 300, 720, 60);
-    // 地平线微光
-    ctx.fillStyle = 'rgba(255,200,100,0.15)';
-    ctx.fillRect(0, 340, 720, 30);
+    ctx.fillStyle = '#4A90D9'; ctx.fillRect(0, 0, 720, 100);
+    ctx.fillStyle = '#87CEEB'; ctx.fillRect(0, 100, 720, 80);
+    ctx.fillStyle = '#B8E0F0'; ctx.fillRect(0, 180, 720, 60);
+    ctx.fillStyle = '#FFEFD5'; ctx.fillRect(0, 240, 720, 40);
   } else {
-    // 夜晚：从深紫到深蓝
-    ctx.fillStyle = '#050a1a';
-    ctx.fillRect(0, 0, 720, 120);
-    ctx.fillStyle = '#0d1530';
-    ctx.fillRect(0, 120, 720, 100);
-    ctx.fillStyle = '#101d40';
-    ctx.fillRect(0, 220, 720, 100);
-    ctx.fillStyle = '#0a1228';
-    ctx.fillRect(0, 320, 720, 80);
+    ctx.fillStyle = '#050a1a'; ctx.fillRect(0, 0, 720, 100);
+    ctx.fillStyle = '#0d1530'; ctx.fillRect(0, 100, 720, 80);
+    ctx.fillStyle = '#101d40'; ctx.fillRect(0, 180, 720, 80);
+    ctx.fillStyle = '#0a1228'; ctx.fillRect(0, 260, 720, 60);
   }
 
-  // ─── Background mountains ───────────────────────────────
-  // 远山 - 最淡的
-  ctx.fillStyle = isDay ? '#6B8E6B' : '#1a2040';
-  // 山峰1
-  ctx.beginPath();
-  ctx.moveTo(0, 360);
-  ctx.lineTo(80, 220);
-  ctx.lineTo(160, 280);
-  ctx.lineTo(240, 200);
-  ctx.lineTo(320, 260);
-  ctx.lineTo(400, 180);
-  ctx.lineTo(480, 240);
-  ctx.lineTo(560, 200);
-  ctx.lineTo(640, 260);
-  ctx.lineTo(720, 220);
-  ctx.lineTo(720, 360);
-  ctx.closePath();
-  ctx.fill();
-
-  // 中山 - 中间色
-  ctx.fillStyle = isDay ? '#4A7040' : '#151d35';
-  ctx.beginPath();
-  ctx.moveTo(0, 380);
-  ctx.lineTo(60, 280);
-  ctx.lineTo(140, 320);
-  ctx.lineTo(220, 260);
-  ctx.lineTo(300, 310);
-  ctx.lineTo(380, 240);
-  ctx.lineTo(460, 300);
-  ctx.lineTo(540, 250);
-  ctx.lineTo(620, 300);
-  ctx.lineTo(720, 260);
-  ctx.lineTo(720, 380);
-  ctx.closePath();
-  ctx.fill();
-
-  // 近山/丘陵 - 最深的
-  ctx.fillStyle = isDay ? '#2D5A27' : '#0f1528';
-  ctx.beginPath();
-  ctx.moveTo(0, 396);
-  ctx.lineTo(50, 330);
-  ctx.lineTo(120, 360);
-  ctx.lineTo(200, 310);
-  ctx.lineTo(280, 350);
-  ctx.lineTo(360, 300);
-  ctx.lineTo(440, 340);
-  ctx.lineTo(520, 305);
-  ctx.lineTo(600, 345);
-  ctx.lineTo(680, 315);
-  ctx.lineTo(720, 330);
-  ctx.lineTo(720, 396);
-  ctx.closePath();
-  ctx.fill();
-
-  // ─── Ground base ───────────────────────────────────────
-  ctx.fillStyle = isDay ? '#228B22' : '#0d1a10';
-  ctx.fillRect(0, 396, 720, 10);
-
-  // 地面过渡
-  ctx.fillStyle = isDay ? '#1a6b1a' : '#091208';
-  ctx.fillRect(0, 406, 720, 10);
-
-  // 泥土层
-  ctx.fillStyle = isDay ? '#3d2817' : '#1a1008';
-  ctx.fillRect(0, 416, 720, 10);
-
-  // ─── Foreground grass tufts ───────────────────────────
-  ctx.fillStyle = isDay ? '#32CD32' : '#1a3d1a';
-  for (let i = 0; i < 30; i++) {
-    const gx = i * 25 + (i % 3) * 8;
-    const gy = 396;
-    // 草叶
-    ctx.fillRect(gx, gy - 8, 2, 8);
-    ctx.fillRect(gx + 4, gy - 6, 2, 6);
-    ctx.fillRect(gx + 8, gy - 10, 2, 10);
-  }
-
-  // ─── Decorative elements ───────────────────────────────
-  // 左右两侧的树/灌木
+  // ─── Background mountains (behind iso grid, clipped to sky area) ───
+  // 山峰底部统一截止到 y=195，在 iso 网格背面（y≈180-200）后面
+  const mtnBase = 195; // 山底截止线
   if (isDay) {
-    // 左边的树
-    ctx.fillStyle = '#1a4d1a'; // 树干
-    ctx.fillRect(20, 350, 12, 50);
-    ctx.fillStyle = '#228B22'; // 树冠
-    ctx.fillRect(8, 310, 36, 40);
-    ctx.fillRect(14, 295, 24, 20);
-    ctx.fillStyle = '#32CD32';
-    ctx.fillRect(16, 298, 20, 14);
+    // 远山（最淡）— 峰值在 y=60-100
+    ctx.fillStyle = '#7B9B6B';
+    ctx.beginPath();
+    ctx.moveTo(0, mtnBase);
+    ctx.lineTo(0, 100);
+    ctx.lineTo(120, 70);
+    ctx.lineTo(200, 90);
+    ctx.lineTo(300, 55);
+    ctx.lineTo(400, 80);
+    ctx.lineTo(500, 60);
+    ctx.lineTo(620, 85);
+    ctx.lineTo(720, 65);
+    ctx.lineTo(720, mtnBase);
+    ctx.closePath();
+    ctx.fill();
 
-    // 右边的灌木丛
-    ctx.fillStyle = '#1a5a1a';
-    ctx.fillRect(680, 370, 30, 30);
-    ctx.fillRect(670, 375, 20, 25);
-    ctx.fillRect(695, 372, 18, 28);
-    ctx.fillStyle = '#228B22';
-    ctx.fillRect(682, 365, 26, 18);
-    ctx.fillRect(673, 370, 14, 15);
-    ctx.fillRect(692, 368, 14, 15);
+    // 中山（中间色）— 峰值在 y=100-130
+    ctx.fillStyle = '#5A8A4A';
+    ctx.beginPath();
+    ctx.moveTo(0, mtnBase);
+    ctx.lineTo(0, 130);
+    ctx.lineTo(80, 110);
+    ctx.lineTo(180, 120);
+    ctx.lineTo(280, 100);
+    ctx.lineTo(380, 115);
+    ctx.lineTo(480, 95);
+    ctx.lineTo(580, 110);
+    ctx.lineTo(680, 105);
+    ctx.lineTo(720, 115);
+    ctx.lineTo(720, mtnBase);
+    ctx.closePath();
+    ctx.fill();
+
+    // 近山/丘陵（最深）— 峰值在 y=130-165
+    ctx.fillStyle = '#3A6A2A';
+    ctx.beginPath();
+    ctx.moveTo(0, mtnBase);
+    ctx.lineTo(0, 165);
+    ctx.lineTo(60, 150);
+    ctx.lineTo(140, 160);
+    ctx.lineTo(240, 145);
+    ctx.lineTo(340, 155);
+    ctx.lineTo(440, 140);
+    ctx.lineTo(540, 155);
+    ctx.lineTo(640, 148);
+    ctx.lineTo(720, 158);
+    ctx.lineTo(720, mtnBase);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // Night: 深色山峦剪影
+    ctx.fillStyle = '#1a2040';
+    ctx.beginPath();
+    ctx.moveTo(0, mtnBase);
+    ctx.lineTo(0, 130); ctx.lineTo(120, 100); ctx.lineTo(240, 120);
+    ctx.lineTo(360, 95); ctx.lineTo(480, 115); ctx.lineTo(600, 100);
+    ctx.lineTo(720, 120); ctx.lineTo(720, mtnBase);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#151d35';
+    ctx.beginPath();
+    ctx.moveTo(0, mtnBase);
+    ctx.lineTo(0, 155); ctx.lineTo(80, 140); ctx.lineTo(200, 150);
+    ctx.lineTo(320, 138); ctx.lineTo(440, 148); ctx.lineTo(560, 140);
+    ctx.lineTo(680, 152); ctx.lineTo(720, 145);
+    ctx.lineTo(720, mtnBase);
+    ctx.closePath();
+    ctx.fill();
   }
 
-  // ─── Small flowers (day only) ──────────────────────────
-  if (isDay) {
-    const flowerColors = ['#FFB6C1', '#FFA500', '#FF69B4', '#FFFFFF', '#87CEEB'];
-    const flowerPositions = [
-      [50, 394], [95, 393], [150, 395], [210, 394], [280, 393],
-      [340, 395], [410, 394], [470, 393], [530, 395], [590, 394],
-      [650, 393], [700, 394]
-    ];
-    flowerPositions.forEach(([fx, fy], i) => {
-      const fc = flowerColors[i % flowerColors.length];
-      ctx.fillStyle = '#FFFF44'; // 花心
-      ctx.fillRect(fx, fy - 3, 2, 2);
-      ctx.fillStyle = fc;
-      ctx.fillRect(fx - 2, fy - 5, 2, 2);
-      ctx.fillRect(fx + 2, fy - 5, 2, 2);
-      ctx.fillRect(fx - 2, fy - 2, 2, 2);
-      ctx.fillRect(fx + 2, fy - 2, 2, 2);
-    });
-
-    // 地面小石子
-    ctx.fillStyle = '#888';
-    [[80, 400], [180, 401], [330, 400], [480, 401], [630, 400]].forEach(([sx, sy]) => {
-      ctx.fillRect(sx, sy, 3, 2);
-    });
-  }
-
-  // ─── Fence posts (day only, sides) ───────────────────
-  if (isDay) {
-    ctx.fillStyle = '#8B6914';
-    [0, 80, 640, 710].forEach(fx => {
-      ctx.fillRect(fx, 370, 6, 30);
-      ctx.fillRect(fx - 2, 368, 10, 4);
-    });
-  }
+  // ─── Isometric Ground ────────────────────────────────────
+  drawIsoGround();
 }
 
 function drawSunMoon() {
@@ -1287,50 +1800,111 @@ function drawEgg() {
 
 let wobble = 0;
 
-// 在场景中绘制宠物
-function drawPet() {
-  if (!g.currentPet) return;
+// 在场景中绘制宠物（支持多宠物）
+// pet: 宠物对象
+// x, y: 宠物在场景中的位置
+// options: { isDragging, clickReaction, petMood, moodBubble }
+function drawPet(pet, x, y, options) {
+  if (!pet) return;
 
-  // Pet position - 居中显示在孵化器上方
-  const px = 360, py = 230;
-  const scale = 2.5; // 48px * 2.5 = 120px
+  const basePx = x, basePy = y;
+  let scale = 2.5;
+  const isDragging = options?.isDragging || false;
+  const clickReaction = options?.clickReaction || null;
+  const petMood = options?.petMood || 'normal';
+  const moodBubble = options?.moodBubble || { show: false };
+
+  if (isDragging) scale = 2.5 * 1.15; // 拖拽时放大
+
+  // 点击反应动画
+  let offsetY = 0;
+  if (clickReaction) {
+    const t = clickReaction.time;
+    const type = clickReaction.type;
+    if (type === 'jump') {
+      // 跳跃：先上升后下落
+      offsetY = -Math.sin(t * Math.PI) * 30;
+    } else if (type === 'bounce') {
+      // 弹跳：多次小弹跳
+      const bounce = Math.abs(Math.sin(t * Math.PI * 3)) * (1 - t);
+      offsetY = -bounce * 20;
+    } else if (type === 'spin') {
+      // 旋转：通过缩放实现
+      scale = 2.5 * (1 + Math.sin(t * Math.PI * 4) * 0.1);
+    } else if (type === 'heart') {
+      // 爱心：轻微上下晃动
+      offsetY = Math.sin(t * Math.PI * 4) * 5;
+    }
+  }
 
   // Create a temporary canvas for the pet sprite
   const petCanvas = document.createElement('canvas');
   petCanvas.width = 48;
   petCanvas.height = 48;
-  drawPetSprite(petCanvas, g.currentPet, g.lastTs / 1000);
+  drawPetSprite(petCanvas, pet, g.lastTs / 1000);
 
   // Draw scaled pet to main canvas
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(petCanvas, px - 24 * scale, py - 24 * scale, 48 * scale, 48 * scale);
+  // 拖拽时添加阴影效果
+  if (isDragging) {
+    ctx.shadowColor = 'rgba(255, 105, 180, 0.5)';
+    ctx.shadowBlur = 15;
+  }
+  ctx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale + offsetY, 48 * scale, 48 * scale);
   ctx.restore();
 
-  const pet = g.currentPet;
+  // ─── 地面投影（宠物脚底椭圆阴影） ───
+  if (!isDragging) {
+    const shadowW = 50 * scale * 0.5;
+    const shadowH = 8 * scale * 0.5;
+    const shadowY = basePy + 20 * scale + offsetY;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.ellipse(basePx, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ─── 撒娇气泡（跟随宠物位置） ───
+  if (moodBubble.show) {
+    const bubbleX = basePx + 60, bubbleY = basePy - 80;
+    // 气泡背景
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillRect(bubbleX - 40, bubbleY - 16, 80, 24);
+    ctx.fillStyle = '#333';
+    // 气泡尖
+    ctx.fillRect(bubbleX - 8, bubbleY + 8, 8, 4);
+    ctx.fillRect(bubbleX, bubbleY + 12, 8, 4);
+    // 气泡文字
+    ctx.fillStyle = '#FF69B4';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('摸摸我~', bubbleX - 28, bubbleY + 4);
+  }
 
   // Draw pet name and star rating above
-  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
-  drawText(pet.name, px - 40, py - 120, P.txt, 2);
-  drawText(starStr, px - 40, py - 96, STAR_COLORS[pet.star], 1);
+  const starStr = '★'.repeat(pet.star || 1) + '☆'.repeat(5 - (pet.star || 1));
+  drawText(pet.name, basePx - 30, basePy - 110, P.txt, 1.2);
+  drawText(starStr, basePx - 30, basePy - 92, STAR_COLORS[pet.star] || '#aaa', 0.8);
 
   // Gene icons
-  const geneStr = pet.genes.map(gk => GENES[gk].icon).join('');
-  if (geneStr) drawText(geneStr, px + 50, py - 112, P.dim, 1);
+  const geneStr = (pet.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
+  if (geneStr) drawText(geneStr, basePx + 40, basePy - 106, P.dim, 0.8);
 
   // Level badge
-  drawText(`Lv${pet.level}`, px + 50, py - 96, '#aaa', 1);
+  drawText(`Lv${pet.level}`, basePx + 40, basePy - 92, '#aaa', 0.8);
 
-  // Hunger warning (top right of pet)
+  // Hunger warning (top right of pet) - 使用全局饥饿度（简化处理）
   if (g.hunger < 30) {
-    drawText('饿了!', px + 90, py - 100, P.danger, 2);
+    drawText('饿了!', basePx + 90, basePy - 100, P.danger, 2);
   }
 
   // Days remaining indicator
   if (pet.expireDay) {
     const daysLeft = pet.expireDay - g.dayCount;
     const daysColor = daysLeft <= 3 ? P.danger : (daysLeft <= 5 ? P.warn : P.dim);
-    drawText(`剩${daysLeft}天`, px - 35, py + 130, daysColor, 2);
+    drawText(`剩${daysLeft}天`, basePx - 35, basePy + 130, daysColor, 2);
   }
 
   // Exp bar below pet
@@ -1339,9 +1913,9 @@ function drawPet() {
   const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
   const barW = 80;
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(px - barW / 2, py + 140, barW, 6);
+  ctx.fillRect(basePx - barW / 2, basePy + 140, barW, 6);
   ctx.fillStyle = '#90EE90';
-  ctx.fillRect(px - barW / 2, py + 140, Math.floor(barW * expProg), 6);
+  ctx.fillRect(basePx - barW / 2, basePy + 140, Math.floor(barW * expProg), 6);
 }
 
 // 绘制所有已孵化宠物列表
@@ -1556,8 +2130,8 @@ function doSynthesize() {
     .map(s => `${s}星(${starGroups[s].length}只)`).join('、') || '无3只同星';
 
   const listHtml = g.pets.map((p, i) => {
-    const starStr = '★'.repeat(p.star) + '☆'.repeat(5 - p.star);
-    const geneStr = p.genes.map(gk => GENES[gk].icon).join('');
+    const starStr = '★'.repeat(p.star || 1) + '☆'.repeat(5 - (p.star || 1));
+    const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
     return `<div class="breed-pet-item" id="breed_item_${i}" onclick="toggleSynthSelect(${i})" style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #333;cursor:pointer">
       <canvas id="breed_canvas_${i}" width="48" height="48" style="image-rendering:pixelated"></canvas>
       <div>
@@ -1677,16 +2251,23 @@ function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
     day: g.dayCount,
     expireDay: g.dayCount + 10,
     breedCount: 0,
+    // 多宠物场景位置（网格自动排列）
+    scenePos: { x: 0, y: 0 },
+    // 宠物互动状态
+    clickReaction: null,
+    petMood: 'normal',
+    moodBubble: { show: false, timer: 0 },
   };
 
   g.pets.push(child);
+  arrangePetsIso(); // 统一网格排列
   g.currentPet = child;
   g.currentScene = 'pets'; // 合成后自动切换到宠物间
   g.hunger = 100;
 
-  const starStr = '★'.repeat(child.star) + '☆'.repeat(5 - child.star);
-  const geneStr = child.genes.map(gk => GENES[gk].icon).join('');
-  const geneNameStr = child.genes.map(gk => GENES[gk].name).join('');
+  const starStr = '★'.repeat(child.star || 1) + '☆'.repeat(5 - (child.star || 1));
+  const geneStr = (child.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
+  const geneNameStr = (child.genes || []).map(gk => (GENES[gk] || {}).name || '').join('');
   const mutated = childGenes.length > 2 || (childGenes.length === 2 && ![...petA.genes, ...petB.genes, ...petC.genes].includes(childGenes[1]));
   const mutText = mutated ? '<br><span style="color:#ff69b4;font-size:12px">✨ 发生基因突变！</span>' : '';
   // 播放音效：突变播放特殊音效
@@ -1732,8 +2313,8 @@ function releasePet(idx) {
 function showPetDetail(idx) {
   const pet = g.pets[idx];
   if (!pet) return;
-  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
-  const geneStr = pet.genes.map(gk => `${GENES[gk].icon}${GENES[gk].name}`).join(' ');
+  const starStr = '★'.repeat(pet.star || 1) + '☆'.repeat(5 - (pet.star || 1));
+  const geneStr = (pet.genes || []).map(gk => `${(GENES[gk] || {}).icon || ''}${(GENES[gk] || {}).name || ''}`).join(' ');
   const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
   const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
   const expProg = Math.floor(((pet.exp - expCur) / (expNext - expCur)) * 100);
@@ -1819,9 +2400,10 @@ function update(dt) {
     g.temp = Math.min(TEMP_MAX, g.temp + 0.3 * dt);
     g.power = Math.max(0, g.power - HEAT_DRAIN * dt);
     if (g.power <= 0) {
+      g.heatOn = false;
+      // 警告音效只在电量刚好耗尽时触发一次
       initAudio();
       playSound('warning');
-      g.heatOn = false;
     }
   } else if (g.iceOn) {
     // 冰袋降温：每秒降3度
@@ -1832,10 +2414,12 @@ function update(dt) {
     g.temp = Math.max(TEMP_MIN, g.temp - coolRate * dt);
   }
 
-  // 温度极端警告
-  if (g.temp >= TEMP_MAX || g.temp <= TEMP_MIN) {
+  // 温度极端警告（带冷却，防止无限循环）
+  g._tempWarnCooldown = (g._tempWarnCooldown || 0) - dt;
+  if ((g.temp >= TEMP_MAX || g.temp <= TEMP_MIN) && g._tempWarnCooldown <= 0) {
     initAudio();
     playSound('warning');
+    g._tempWarnCooldown = 3; // 3秒冷却
   }
 
   // Hatch rate
@@ -1899,6 +2483,34 @@ function update(dt) {
       finalizeHatch();
     }
   }
+  
+  // ─── 宠物互动增强：心情系统（简化版，仅处理点击触发的表情） ───
+  // 更新每只宠物的点击反应动画
+  g.pets.forEach(pet => {
+    if (pet.clickReaction && typeof pet.clickReaction.time === 'number') {
+      pet.clickReaction.time += dt;
+      if (pet.clickReaction.time > 0.8) {
+        pet.clickReaction = null;
+      }
+    }
+    // 更新心情气泡计时器
+    if (pet.moodBubble && typeof pet.moodBubble.timer === 'number' && pet.moodBubble.timer > 0) {
+      pet.moodBubble.timer -= dt;
+      if (pet.moodBubble.timer <= 0) {
+        pet.moodBubble.show = false;
+        pet.moodBubble.timer = 0;
+      }
+    }
+  });
+
+  // 更新爱心粒子
+  g.heartParticles = g.heartParticles.filter(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.05; // 重力
+    p.life -= dt * 1.5;
+    return p.life > 0;
+  });
 }
 
 function triggerRandomEvent() {
@@ -1981,6 +2593,12 @@ function finalizeHatch() {
     day: g.dayCount,
     expireDay: g.dayCount + 10,  // 寿命10天
     breedCount: 0,            // 已被繁殖次数
+    // 多宠物场景位置（网格自动排列）
+    scenePos: { x: 0, y: 0 },
+    // 宠物互动状态
+    clickReaction: null,
+    petMood: 'normal',
+    moodBubble: { show: false, timer: 0 },
   };
 
   // 宠物上限检查：满了则拒绝孵化
@@ -1993,6 +2611,7 @@ function finalizeHatch() {
   }
 
   g.pets.push(newPet);
+  arrangePetsIso(); // 统一网格排列
   g.currentPet = g.pets[g.pets.length - 1];
   g.currentScene = 'pets'; // 孵化完成自动切换到宠物间
   g.hunger = 100;
@@ -2089,13 +2708,47 @@ function doPet() {
     showToast(`冷却中 ${Math.ceil(g.petCdLeft)}秒`);
     return;
   }
-  if (!g.currentPet) return;
+  if (g.pets.length === 0) {
+    showToast('还没有宠物！');
+    return;
+  }
+  // 默认抚摸第一只宠物（后续可扩展为选中特定宠物）
+  const pet = g.pets[0];
+  const petPos = pet.scenePos || { x: 360, y: 230 };
   g.intimacy = Math.min(100, g.intimacy + 8);
   playSound('pet');
   g.petCdLeft = PET_COOLDOWN;
   g.wobble = 10;
   // 给予经验
-  addExp(g.currentPet, 5);
+  addExp(pet, 5);
+
+  // ─── 宠物互动增强：抚摸反馈 ───
+  g.lastInteractTime = Date.now();
+  g.idleTime = 0;
+
+  // 随机触发特效（设置在该宠物身上）
+  const reactions = ['jump', 'heart', 'spin', 'bounce'];
+  pet.clickReaction = {
+    type: reactions[Math.floor(Math.random() * reactions.length)],
+    time: 0
+  };
+
+  // 发射爱心粒子（从宠物当前位置）
+  for (let i = 0; i < 8; i++) {
+    g.heartParticles.push({
+      x: petPos.x + (Math.random() - 0.5) * 60,
+      y: petPos.y - 20 + (Math.random() - 0.5) * 60,
+      vx: (Math.random() - 0.5) * 2.5,
+      vy: -Math.random() * 2.5 - 1,
+      life: 1,
+      size: 5 + Math.random() * 5
+    });
+  }
+
+  // 显示开心表情（设置在该宠物身上）
+  pet.petMood = 'happy';
+  pet.moodBubble = { show: true, timer: 2.5 };
+
   updateBtnUI();
   saveGame();
 }
@@ -2148,8 +2801,8 @@ function showAlbum() {
   } else {
     const list = g.pets.map((p, idx) => {
       const canvasId = `pet_sprite_${idx}`;
-      const starStr = '★'.repeat(p.star) + '☆'.repeat(5 - p.star);
-      const geneStr = p.genes.map(gk => GENES[gk].icon).join('') || '无';
+      const starStr = '★'.repeat(p.star || 1) + '☆'.repeat(5 - (p.star || 1));
+      const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('') || '无';
       const daysLeft = p.expireDay - g.dayCount;
       return `<div onclick="showPetDetail(${idx})" style="margin:4px 0;padding:6px;border-bottom:1px solid #333;display:flex;align-items:center;gap:10px;cursor:pointer">
         <canvas id="${canvasId}" width="48" height="48" style="image-rendering:pixelated;border:1px solid #444"></canvas>
@@ -2389,12 +3042,64 @@ function drawPetSprite(canvas, pet, animTime) {
   }
 
   // ========== 眼睛 ==========
+  // 简化处理：精灵表情默认 normal，心情通过 moodBubble 显示
+  const mood = 'normal';
+  
   if (isBlinking) {
     // 眨眼：眯成一条线
     ctx.fillStyle = '#222';
     ctx.fillRect(cx - 7, headY - 1, 6, 2);
     ctx.fillRect(cx + 1, headY - 1, 6, 2);
+  } else if (mood === 'happy') {
+    // 开心：弯弯的笑眼 ^_^
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 8, headY - 2, 6, 3);
+    ctx.fillRect(cx + 2, headY - 2, 6, 3);
+    ctx.fillStyle = '#90EE90';
+    ctx.fillRect(cx - 8, headY - 2, 6, 3);
+    ctx.fillRect(cx + 2, headY - 2, 6, 3);
+    // 笑眼弧线
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 6, headY, 4, 2);
+    ctx.fillRect(cx + 2, headY, 4, 2);
+    ctx.fillRect(cx - 8, headY + 1, 2, 1);
+    ctx.fillRect(cx + 6, headY + 1, 2, 1);
+  } else if (mood === 'sleepy') {
+    // 困了：半闭的眼睛
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 7, headY, 6, 3);
+    ctx.fillRect(cx + 1, headY, 6, 3);
+    // ZZZ气泡
+    ctx.fillStyle = '#aaa';
+    ctx.fillRect(cx + 15, headY - 15, 3, 5);
+    ctx.fillRect(cx + 18, headY - 18, 3, 5);
+    ctx.fillRect(cx + 21, headY - 21, 3, 5);
+  } else if (mood === 'hungry') {
+    // 饿了：大眼睛水汪汪
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 7, headY - 3, 7, 7);
+    ctx.fillRect(cx + 0, headY - 3, 7, 7);
+    ctx.fillStyle = '#4FC3F7';
+    ctx.fillRect(cx - 7, headY - 3, 7, 7);
+    ctx.fillRect(cx + 0, headY - 3, 7, 7);
+    // 眼泪
+    ctx.fillStyle = '#81D4FA';
+    ctx.fillRect(cx - 5, headY + 3, 2, 3);
+    ctx.fillRect(cx + 4, headY + 3, 2, 3);
+  } else if (mood === 'cute') {
+    // 撒娇：星星眼
+    ctx.fillStyle = '#222';
+    ctx.fillRect(cx - 7, headY - 2, 6, 6);
+    ctx.fillRect(cx + 1, headY - 2, 6, 6);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(cx - 7, headY - 2, 6, 6);
+    ctx.fillRect(cx + 1, headY - 2, 6, 6);
+    // 星星
+    ctx.fillStyle = '#FFF';
+    ctx.fillRect(cx - 5, headY - 1, 2, 2);
+    ctx.fillRect(cx + 3, headY - 1, 2, 2);
   } else {
+    // 普通表情
     ctx.fillStyle = '#222';
     if (petType === 0) {
       // 猫眼 (竖瞳)
@@ -2550,16 +3255,29 @@ function loadGame() {
       if (cp) g.currentPet = cp;
       else g.currentPet = g.pets[g.pets.length - 1];
     }
+    // 确保 currentPet.genes 也是数组
+    if (g.currentPet && !Array.isArray(g.currentPet.genes)) {
+      g.currentPet.genes = [];
+    }
     // 旧存档升级：补全新宠物字段
     g.pets.forEach(p => {
       if (p.star === undefined) p.star = 1;
       if (p.level === undefined) p.level = 1;
       if (p.exp === undefined) p.exp = 0;
-      if (p.genes === undefined) p.genes = [];
+      if (!Array.isArray(p.genes)) p.genes = []; // 确保是数组
       if (p.generation === undefined) p.generation = 1;
       if (p.father === undefined) p.father = null;
       if (p.mother === undefined) p.mother = null;
       if (p.breedCount === undefined) p.breedCount = 0;
+      // 旧存档：补全多宠物场景位置和互动状态
+      if (!p.scenePos) {
+        p.scenePos = { x: 0, y: 0 }; // 网格自动排列
+      }
+      if (p.clickReaction === undefined) p.clickReaction = null;
+      if (p.petMood === undefined) p.petMood = 'normal';
+      if (!p.moodBubble || typeof p.moodBubble.timer !== 'number') {
+        p.moodBubble = { show: false, timer: 0 };
+      }
     });
     // Offline progress
     if (data.lastSave) {
@@ -2575,13 +3293,18 @@ function loadGame() {
     if (g.nextHatchDay === undefined) {
       g.nextHatchDay = 0;
     }
+    // 旧存档升级：补全拖拽系统字段
+    if (g.draggingPetId === undefined) g.draggingPetId = null;
+    // 统一网格排列
+    arrangePetsIso();
   } catch(e) {}
 }
 
 // ─── Scene helpers: render to any ctx ──────────────────────────
 function drawTextToCtx(targetCtx, x, y, text, color, scale) {
+  if (text == null) return; // 防止 null/undefined 崩溃
   targetCtx.imageSmoothingEnabled = false;
-  const hasCJK = /[^\x00-\x7E]/.test(text);
+  const hasCJK = /[^\x00-\x7E]/.test(String(text));
   if (hasCJK) {
     targetCtx.fillStyle = color;
     const fontSize = Math.max(14, Math.floor(14 * scale));
@@ -2616,92 +3339,67 @@ function drawTextToCtx(targetCtx, x, y, text, color, scale) {
 function drawBgToCtx(targetCtx) {
   const isDay = g.isDay;
   if (isDay) {
-    targetCtx.fillStyle = '#4A90D9'; targetCtx.fillRect(0, 0, 720, 120);
-    targetCtx.fillStyle = '#87CEEB'; targetCtx.fillRect(0, 120, 720, 100);
-    targetCtx.fillStyle = '#B8E0F0'; targetCtx.fillRect(0, 220, 720, 80);
-    targetCtx.fillStyle = '#FFEFD5'; targetCtx.fillRect(0, 300, 720, 60);
-    targetCtx.fillStyle = 'rgba(255,200,100,0.15)'; targetCtx.fillRect(0, 340, 720, 30);
+    targetCtx.fillStyle = '#4A90D9'; targetCtx.fillRect(0, 0, 720, 100);
+    targetCtx.fillStyle = '#87CEEB'; targetCtx.fillRect(0, 100, 720, 80);
+    targetCtx.fillStyle = '#B8E0F0'; targetCtx.fillRect(0, 180, 720, 60);
+    targetCtx.fillStyle = '#FFEFD5'; targetCtx.fillRect(0, 240, 720, 40);
   } else {
-    targetCtx.fillStyle = '#050a1a'; targetCtx.fillRect(0, 0, 720, 120);
-    targetCtx.fillStyle = '#0d1530'; targetCtx.fillRect(0, 120, 720, 100);
-    targetCtx.fillStyle = '#101d40'; targetCtx.fillRect(0, 220, 720, 100);
-    targetCtx.fillStyle = '#0a1228'; targetCtx.fillRect(0, 320, 720, 80);
+    targetCtx.fillStyle = '#050a1a'; targetCtx.fillRect(0, 0, 720, 100);
+    targetCtx.fillStyle = '#0d1530'; targetCtx.fillRect(0, 100, 720, 80);
+    targetCtx.fillStyle = '#101d40'; targetCtx.fillRect(0, 180, 720, 80);
+    targetCtx.fillStyle = '#0a1228'; targetCtx.fillRect(0, 260, 720, 60);
   }
-  // Mountains
-  targetCtx.fillStyle = isDay ? '#6B8E6B' : '#1a2040';
-  targetCtx.beginPath();
-  targetCtx.moveTo(0, 360); targetCtx.lineTo(80, 220); targetCtx.lineTo(160, 280);
-  targetCtx.lineTo(240, 200); targetCtx.lineTo(320, 260); targetCtx.lineTo(400, 180);
-  targetCtx.lineTo(480, 240); targetCtx.lineTo(560, 200); targetCtx.lineTo(640, 260);
-  targetCtx.lineTo(720, 220); targetCtx.lineTo(720, 360); targetCtx.closePath();
-  targetCtx.fill();
-  targetCtx.fillStyle = isDay ? '#4A7040' : '#151d35';
-  targetCtx.beginPath();
-  targetCtx.moveTo(0, 380); targetCtx.lineTo(60, 280); targetCtx.lineTo(140, 320);
-  targetCtx.lineTo(220, 260); targetCtx.lineTo(300, 300); targetCtx.lineTo(380, 240);
-  targetCtx.lineTo(460, 280); targetCtx.lineTo(540, 260); targetCtx.lineTo(620, 300);
-  targetCtx.lineTo(720, 260); targetCtx.lineTo(720, 380); targetCtx.closePath();
-  targetCtx.fill();
-  targetCtx.fillStyle = isDay ? '#3A5A30' : '#101828';
-  targetCtx.beginPath();
-  targetCtx.moveTo(0, 400); targetCtx.lineTo(100, 340); targetCtx.lineTo(200, 370);
-  targetCtx.lineTo(300, 320); targetCtx.lineTo(400, 360); targetCtx.lineTo(500, 310);
-  targetCtx.lineTo(600, 350); targetCtx.lineTo(720, 330); targetCtx.lineTo(720, 400);
-  targetCtx.closePath();
-  targetCtx.fill();
-  // Ground layers
-  targetCtx.fillStyle = isDay ? '#7CBA5F' : '#1a2a10';
-  targetCtx.fillRect(0, 400, 720, 30);
-  targetCtx.fillStyle = isDay ? '#5A9A3F' : '#151f0d';
-  targetCtx.fillRect(0, 430, 720, 40);
-  targetCtx.fillStyle = isDay ? '#4A7A2F' : '#101508';
-  targetCtx.fillRect(0, 470, 720, 106);
-  // Grass blades
-  targetCtx.fillStyle = isDay ? '#6AAA4F' : '#1a2a10';
-  for (let i = 0; i < 30; i++) {
-    const gx = (i * 25 + 5) % 710;
-    targetCtx.fillRect(gx, 465, 2, 12);
-    targetCtx.fillRect(gx + 4, 467, 1, 10);
-  }
-  // Day decorations
-  if (isDay) {
-    for (let i = 0; i < 5; i++) {
-      const fx = 80 + i * 130;
-      targetCtx.fillStyle = '#fff'; targetCtx.fillRect(fx, 436, 4, 4);
-      targetCtx.fillStyle = '#FFD700'; targetCtx.fillRect(fx + 1, 435, 2, 2);
-    }
-    const stones = [[50, 450], [180, 455], [400, 448], [600, 452], [650, 458]];
-    stones.forEach(([sx, sy]) => {
-      targetCtx.fillStyle = '#888'; targetCtx.fillRect(sx, sy, 8, 5);
-      targetCtx.fillStyle = '#999'; targetCtx.fillRect(sx + 1, sy - 1, 5, 3);
-    });
-    targetCtx.fillStyle = '#654321'; targetCtx.fillRect(620, 410, 6, 30);
-    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(613, 400, 20, 15);
-    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(618, 395, 14, 10);
-    targetCtx.fillStyle = '#654321'; targetCtx.fillRect(80, 415, 5, 25);
-    targetCtx.fillStyle = '#2d5a1b'; targetCtx.fillRect(73, 407, 18, 12);
-    targetCtx.fillStyle = '#555'; targetCtx.fillRect(300, 445, 25, 5);
-    targetCtx.fillStyle = '#666'; targetCtx.fillRect(305, 442, 15, 4);
-    for (let i = 0; i < 6; i++) {
-      const bx = 280 + i * 12;
-      targetCtx.fillStyle = '#ddd'; targetCtx.fillRect(bx, 437, 8, 3);
-    }
-  } else {
-    // Night stars
+  // Night stars (sky, before isometric ground)
+  if (!isDay) {
     const stars = [[50,30],[120,60],[200,25],[300,50],[380,20],[450,55],[520,35],[600,50],[660,25],[150,80],[350,75],[550,70],[700,60]];
     stars.forEach(([sx, sy]) => {
       const twink = Math.sin(g.lastTs / 1000 + sx) > 0.5 ? 1.5 : 1.0;
       targetCtx.fillStyle = `rgba(255,255,200,${twink > 1 ? 0.9 : 0.5})`;
       targetCtx.fillRect(sx, sy, twink, twink);
     });
-    // Moon
-    targetCtx.fillStyle = '#FFFACD';
-    targetCtx.beginPath(); targetCtx.arc(620, 70, 28, 0, Math.PI * 2); targetCtx.fill();
-    targetCtx.fillStyle = '#E8E4B8';
-    [[608, 60, 5], [628, 75, 4], [618, 82, 3], [632, 58, 3]].forEach(([mx, my, mr]) => {
-      targetCtx.beginPath(); targetCtx.arc(mx, my, mr, 0, Math.PI * 2); targetCtx.fill();
-    });
   }
+  // Mountains (behind iso grid, clipped to sky area)
+  const mtnBase = 195;
+  if (isDay) {
+    targetCtx.fillStyle = '#7B9B6B';
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, mtnBase); targetCtx.lineTo(0, 100);
+    targetCtx.lineTo(120, 70); targetCtx.lineTo(200, 90); targetCtx.lineTo(300, 55);
+    targetCtx.lineTo(400, 80); targetCtx.lineTo(500, 60); targetCtx.lineTo(620, 85);
+    targetCtx.lineTo(720, 65); targetCtx.lineTo(720, mtnBase);
+    targetCtx.closePath(); targetCtx.fill();
+    targetCtx.fillStyle = '#5A8A4A';
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, mtnBase); targetCtx.lineTo(0, 130); targetCtx.lineTo(80, 110);
+    targetCtx.lineTo(180, 120); targetCtx.lineTo(280, 100); targetCtx.lineTo(380, 115);
+    targetCtx.lineTo(480, 95); targetCtx.lineTo(580, 110); targetCtx.lineTo(680, 105);
+    targetCtx.lineTo(720, 115); targetCtx.lineTo(720, mtnBase);
+    targetCtx.closePath(); targetCtx.fill();
+    targetCtx.fillStyle = '#3A6A2A';
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, mtnBase); targetCtx.lineTo(0, 165); targetCtx.lineTo(60, 150);
+    targetCtx.lineTo(140, 160); targetCtx.lineTo(240, 145); targetCtx.lineTo(340, 155);
+    targetCtx.lineTo(440, 140); targetCtx.lineTo(540, 155); targetCtx.lineTo(640, 148);
+    targetCtx.lineTo(720, 158); targetCtx.lineTo(720, mtnBase);
+    targetCtx.closePath(); targetCtx.fill();
+  } else {
+    targetCtx.fillStyle = '#1a2040';
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, mtnBase); targetCtx.lineTo(0, 130);
+    targetCtx.lineTo(120, 100); targetCtx.lineTo(240, 120);
+    targetCtx.lineTo(360, 95); targetCtx.lineTo(480, 115); targetCtx.lineTo(600, 100);
+    targetCtx.lineTo(720, 120); targetCtx.lineTo(720, mtnBase);
+    targetCtx.closePath(); targetCtx.fill();
+    targetCtx.fillStyle = '#151d35';
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, mtnBase); targetCtx.lineTo(0, 155); targetCtx.lineTo(80, 140);
+    targetCtx.lineTo(200, 150); targetCtx.lineTo(320, 138); targetCtx.lineTo(440, 148);
+    targetCtx.lineTo(560, 140); targetCtx.lineTo(680, 152); targetCtx.lineTo(720, 145);
+    targetCtx.lineTo(720, mtnBase);
+    targetCtx.closePath(); targetCtx.fill();
+  }
+  // Isometric Ground
+  drawIsoGroundToCtx(targetCtx);
 }
 
 function drawSunMoonToCtx(targetCtx) {
@@ -2844,35 +3542,115 @@ function drawHatchingAnimToCtx(targetCtx) {
   targetCtx.restore();
 }
 
-function drawPetToCtx(targetCtx) {
-  if (!g.currentPet) return;
-  const pet = g.currentPet;
-  const px = 360, py = 230;
-  const scale = 2.5;
+// 在场景中绘制宠物到指定Context（支持多宠物独立状态）
+// targetCtx: 目标画布上下文
+// pet: 宠物对象
+// x, y: 宠物在场景中的位置
+// options: { isDragging, clickReaction, petMood, moodBubble }
+function drawPetToCtx(targetCtx, pet, x, y, options) {
+  if (!pet) return;
+
+  const basePx = x, basePy = y;
+  let scale = 2.5;
+  const isDragging = options?.isDragging || false;
+  const clickReaction = options?.clickReaction || null;
+  const moodBubble = options?.moodBubble || { show: false };
+
+  if (isDragging) scale = 2.5 * 1.15; // 拖拽时放大
+
+  // 点击反应动画
+  let offsetY = 0;
+  if (clickReaction) {
+    const t = clickReaction.time;
+    const type = clickReaction.type;
+    if (type === 'jump') {
+      offsetY = -Math.sin(t * Math.PI) * 30;
+    } else if (type === 'bounce') {
+      const bounce = Math.abs(Math.sin(t * Math.PI * 3)) * (1 - t);
+      offsetY = -bounce * 20;
+    } else if (type === 'spin') {
+      scale = 2.5 * (1 + Math.sin(t * Math.PI * 4) * 0.1);
+    } else if (type === 'heart') {
+      offsetY = Math.sin(t * Math.PI * 4) * 5;
+    }
+  }
+
+  // Create a temporary canvas for the pet sprite
   const petCanvas = document.createElement('canvas');
-  petCanvas.width = 48; petCanvas.height = 48;
+  petCanvas.width = 48;
+  petCanvas.height = 48;
   drawPetSprite(petCanvas, pet, g.lastTs / 1000);
+
+  // Draw scaled pet to target canvas
   targetCtx.save();
   targetCtx.imageSmoothingEnabled = false;
-  targetCtx.drawImage(petCanvas, px - 24 * scale, py - 24 * scale, 48 * scale, 48 * scale);
+  // 拖拽时添加阴影效果
+  if (isDragging) {
+    targetCtx.shadowColor = 'rgba(255, 105, 180, 0.5)';
+    targetCtx.shadowBlur = 15;
+  }
+  targetCtx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale + offsetY, 48 * scale, 48 * scale);
   targetCtx.restore();
-  const starStr = '★'.repeat(pet.star) + '☆'.repeat(5 - pet.star);
-  drawTextToCtx(targetCtx, px - 40, py - 120, pet.name, P.txt, 2);
-  drawTextToCtx(targetCtx, px - 40, py - 96, starStr, STAR_COLORS[pet.star], 1);
-  const geneStr = pet.genes.map(gk => GENES[gk].icon).join('');
-  if (geneStr) drawTextToCtx(targetCtx, px + 50, py - 112, geneStr, P.dim, 1);
-  drawTextToCtx(targetCtx, px + 50, py - 96, `Lv${pet.level}`, '#aaa', 1);
-  if (g.hunger < 30) drawTextToCtx(targetCtx, px + 90, py - 100, '饿了!', P.danger, 2);
+
+  // ─── 地面投影 ───
+  if (!isDragging) {
+    const shadowW = 50 * scale * 0.5;
+    const shadowH = 8 * scale * 0.5;
+    const shadowY = basePy + 20 * scale + offsetY;
+    targetCtx.save();
+    targetCtx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    targetCtx.beginPath();
+    targetCtx.ellipse(basePx, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
+    targetCtx.fill();
+    targetCtx.restore();
+  }
+
+  // ─── 撒娇气泡（跟随宠物位置） ───
+  if (moodBubble.show) {
+    const bubbleX = basePx + 60, bubbleY = basePy - 80;
+    targetCtx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    targetCtx.fillRect(bubbleX - 40, bubbleY - 16, 80, 24);
+    targetCtx.fillStyle = '#333';
+    targetCtx.fillRect(bubbleX - 8, bubbleY + 8, 8, 4);
+    targetCtx.fillRect(bubbleX, bubbleY + 12, 8, 4);
+    targetCtx.fillStyle = '#FF69B4';
+    targetCtx.font = 'bold 12px sans-serif';
+    targetCtx.fillText('摸摸我~', bubbleX - 28, bubbleY + 4);
+  }
+
+  // Draw pet name and star rating above
+  const starStr = '★'.repeat(pet.star || 1) + '☆'.repeat(5 - (pet.star || 1));
+  drawTextToCtx(targetCtx, basePx - 40, basePy - 120, pet.name, P.txt, 2);
+  drawTextToCtx(targetCtx, basePx - 40, basePy - 96, starStr, STAR_COLORS[pet.star] || '#aaa', 1);
+
+  // Gene icons
+  const geneStr = (pet.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
+  if (geneStr) drawTextToCtx(targetCtx, basePx + 50, basePy - 112, geneStr, P.dim, 1);
+
+  // Level badge
+  drawTextToCtx(targetCtx, basePx + 50, basePy - 96, `Lv${pet.level}`, '#aaa', 1);
+
+  // Hunger warning - 使用全局饥饿度
+  if (g.hunger < 30) {
+    drawTextToCtx(targetCtx, basePx + 90, basePy - 100, '饿了!', P.danger, 2);
+  }
+
+  // Days remaining indicator
   if (pet.expireDay) {
     const daysLeft = pet.expireDay - g.dayCount;
-    const daysColor = daysLeft <= 3 ? P.danger : '#aaa';
-    drawTextToCtx(targetCtx, px - 35, py + 130, `剩${daysLeft}天`, daysColor, 2);
+    const daysColor = daysLeft <= 3 ? P.danger : (daysLeft <= 5 ? P.warn : P.dim);
+    drawTextToCtx(targetCtx, basePx - 35, basePy + 130, `剩${daysLeft}天`, daysColor, 2);
   }
-  const expForNext = EXP_TABLE[pet.level] || 100;
-  const expPct = Math.min(1, pet.exp / expForNext);
-  targetCtx.fillStyle = '#333'; targetCtx.fillRect(px - 50, py + 150, 100, 8);
-  targetCtx.fillStyle = '#4CAF50'; targetCtx.fillRect(px - 50, py + 150, 100 * expPct, 8);
-  drawTextToCtx(targetCtx, px - 50, py + 160, `EXP ${pet.exp}/${expForNext}`, '#aaa', 1);
+
+  // Exp bar below pet
+  const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
+  const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
+  const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
+  const barW = 80;
+  targetCtx.fillStyle = P.barBg;
+  targetCtx.fillRect(basePx - barW / 2, basePy + 140, barW, 6);
+  targetCtx.fillStyle = '#90EE90';
+  targetCtx.fillRect(basePx - barW / 2, basePy + 140, Math.floor(barW * expProg), 6);
 }
 
 
@@ -2922,8 +3700,26 @@ function loop() {
     } else {
       drawBgToCtx(oldCtx);
       drawSunMoonToCtx(oldCtx);
-      if (g.currentPet) drawPetToCtx(oldCtx);
-      else { drawTextToCtx(oldCtx, 300, 260, '还没有宠物', P.dim, 2); drawTextToCtx(oldCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1); }
+      // 旧场景过渡：绘制所有宠物（depth sorted）
+      if (g.pets.length > 0) {
+        const sortedPets = [...g.pets].sort((a, b) => {
+          const da = (a.isoCol || 0) + (a.isoRow || 0);
+          const db = (b.isoCol || 0) + (b.isoRow || 0);
+          if (da !== db) return da - db;
+          return (a.isoCol || 0) - (b.isoCol || 0);
+        });
+        sortedPets.forEach(pet => {
+          if (pet.scenePos) {
+            const feetY = pet.scenePos.y - TILE_H / 2;
+            drawPetToCtx(oldCtx, pet, pet.scenePos.x, feetY, {
+              isDragging: g.draggingPetId === pet.id
+            });
+          }
+        });
+      } else {
+        drawTextToCtx(oldCtx, 300, 260, '还没有宠物', P.dim, 2);
+        drawTextToCtx(oldCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1);
+      }
     }
     ctx.drawImage(oldCanvas, oldOffset, 0);
 
@@ -2941,8 +3737,26 @@ function loop() {
     } else {
       drawBgToCtx(newCtx);
       drawSunMoonToCtx(newCtx);
-      if (g.currentPet) drawPetToCtx(newCtx);
-      else { drawTextToCtx(newCtx, 300, 260, '还没有宠物', P.dim, 2); drawTextToCtx(newCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1); }
+      // 新场景过渡：绘制所有宠物（depth sorted）
+      if (g.pets.length > 0) {
+        const sortedPets = [...g.pets].sort((a, b) => {
+          const da = (a.isoCol || 0) + (a.isoRow || 0);
+          const db = (b.isoCol || 0) + (b.isoRow || 0);
+          if (da !== db) return da - db;
+          return (a.isoCol || 0) - (b.isoCol || 0);
+        });
+        sortedPets.forEach(pet => {
+          if (pet.scenePos) {
+            const feetY = pet.scenePos.y - TILE_H / 2;
+            drawPetToCtx(newCtx, pet, pet.scenePos.x, feetY, {
+              isDragging: g.draggingPetId === pet.id
+            });
+          }
+        });
+      } else {
+        drawTextToCtx(newCtx, 300, 260, '还没有宠物', P.dim, 2);
+        drawTextToCtx(newCtx, 290, 290, '去孵蛋室孵化吧', P.dim, 1);
+      }
     }
     ctx.drawImage(newCanvas, newOffset, 0);
   } else {
@@ -2957,8 +3771,37 @@ function loop() {
         drawEgg();
       }
     } else {
-      if (g.currentPet) {
-        drawPet();
+      // 宠物间场景：绘制所有宠物
+      if (g.pets.length > 0) {
+        // 先绘制爱心粒子（所有宠物共享）
+        g.heartParticles.forEach(p => {
+          ctx.fillStyle = `rgba(255, 105, 180, ${p.life})`;
+          const hx = Math.floor(p.x), hy = Math.floor(p.y);
+          const hs = Math.floor(p.size);
+          ctx.fillRect(hx - hs/2, hy - hs/4, hs/2, hs/4);
+          ctx.fillRect(hx, hy - hs/4, hs/2, hs/4);
+          ctx.fillRect(hx - hs/4, hy, hs/2, hs/2);
+          ctx.fillRect(hx, hy, hs/2, hs/2);
+        });
+        // 绘制每只宠物（按 isometric 深度排序：col+row 小的先画，同深度按 col 排）
+        const sortedPets = [...g.pets].sort((a, b) => {
+          const da = (a.isoCol || 0) + (a.isoRow || 0);
+          const db = (b.isoCol || 0) + (b.isoRow || 0);
+          if (da !== db) return da - db;
+          return (a.isoCol || 0) - (b.isoCol || 0);
+        });
+        sortedPets.forEach(pet => {
+          if (pet.scenePos) {
+            // 脚底落在 isometric tile 顶端（tile center y - TILE_H/2）
+            const feetY = pet.scenePos.y - TILE_H / 2;
+            drawPet(pet, pet.scenePos.x, feetY, {
+              isDragging: g.draggingPetId === pet.id,
+              clickReaction: pet.clickReaction || null,
+              petMood: pet.petMood || 'normal',
+              moodBubble: pet.moodBubble || { show: false },
+            });
+          }
+        });
       } else {
         drawText('还没有宠物', 300, 260, P.dim, 2);
         drawText('去孵蛋室孵化吧', 290, 290, P.dim, 1);
@@ -2968,7 +3811,7 @@ function loop() {
 
   // ─── 场景切换箭头（覆盖在场景内容上方，滑动时隐藏） ───
   if (!g.sceneTransition.active) {
-    const canSwitchToPets = g.currentPet !== null;
+    const canSwitchToPets = g.pets.length > 0;
 
     // 左箭头：圆形按钮 + 三角形（宠物间时显示）
     if (g.currentScene === 'pets') {
