@@ -212,6 +212,7 @@ let g = {
   hunger: 100,     // 饥饿度 0-100
   lastTs: Date.now(),
   inventory: { worm: 2, fruit: 1, treat: 0 },
+  droppedFood: [],           // 地上的食物 { x, y, type, timer }
   eggs: [{ id: 1, temp: 25, hatch: 0, intimacy: 50 }],
   pets: [],
   nextHatchDay: 0,  // 第几天可以孵化下一只
@@ -559,6 +560,29 @@ canvas.addEventListener('click', (e) => {
     return;
   }
 
+  // ─── 点击空地：扔食物（仅宠物间场景，有食物时） ───
+  if (g.currentScene === 'pets' && g.pets.length > 0 && !g.sceneTransition.active) {
+    const totalFood = g.inventory.worm + g.inventory.fruit + g.inventory.treat;
+    if (totalFood > 0) {
+      // 按优先级选择食物：虫子→水果→饲料
+      let foodType = null;
+      if (g.inventory.worm > 0) foodType = 'worm';
+      else if (g.inventory.fruit > 0) foodType = 'fruit';
+      else if (g.inventory.treat > 0) foodType = 'treat';
+      if (foodType) {
+        g.inventory[foodType]--;
+        g.droppedFood.push({
+          x: mx,
+          y: my,
+          type: foodType,
+          timer: 60
+        });
+        initAudio();
+        playSound('forage');
+        saveGame();
+      }
+    }
+  }
 });
 
 // ─── 拖拽系统 ─────────────────────────────────────────────────────
@@ -1938,6 +1962,9 @@ function update(dt) {
     saveGame();
   }
 
+  // 地面食物计时
+  updateDroppedFood(dt);
+
   // Cooldowns
   if (g.petCdLeft > 0) g.petCdLeft = Math.max(0, g.petCdLeft - dt);
   if (g.feedCdLeft > 0) g.feedCdLeft = Math.max(0, g.feedCdLeft - dt);
@@ -2078,6 +2105,9 @@ function updatePetWander(dt) {
     if (!pet.scenePos) return;
     if (g.draggingPetId === pet.id) return;
     if (pet.interactAnim && pet.interactAnim.time > 0) return;
+
+    // 优先寻路捡食
+    if (seekFood(pet, dt)) return;
 
     pet.wanderTimer -= dt;
 
@@ -3230,6 +3260,79 @@ function loadGame() {
   } catch(e) {}
 }
 
+// ─── 地面食物绘制 ───────────────────────────────────────────────
+const FOOD_COLORS = { worm: '#8B4513', fruit: '#FF6B35', treat: '#FFD700' };
+const FOOD_ICONS = {
+  worm: (x, y) => { ctx.fillStyle = '#8B4513'; ctx.fillRect(x-4, y-2, 8, 4); ctx.fillStyle = '#A0522D'; ctx.fillRect(x-2, y-1, 4, 2); },
+  fruit: (x, y) => { ctx.fillStyle = '#FF6B35'; ctx.fillRect(x-4, y-4, 8, 8); ctx.fillStyle = '#4CAF50'; ctx.fillRect(x-1, y-6, 2, 3); },
+  treat: (x, y) => { ctx.fillStyle = '#FFD700'; ctx.fillRect(x-3, y-5, 6, 10); ctx.fillStyle = '#FFF'; ctx.fillRect(x-1, y-3, 2, 2); },
+};
+
+function drawDroppedFood() {
+  g.droppedFood.forEach(f => {
+    const alpha = Math.min(1, f.timer / 10); // 最后10秒淡出
+    ctx.globalAlpha = alpha;
+    // 食物脚下小阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
+    // 食物图标
+    const draw = FOOD_ICONS[f.type];
+    if (draw) draw(f.x, f.y);
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ─── 宠物寻路捡食 ───────────────────────────────────────────────
+function seekFood(pet, dt) {
+  if (g.droppedFood.length === 0) return false;
+  if (pet.interactAnim && pet.interactAnim.time > 0) return false;
+
+  // 找到最近的食物
+  let nearest = null, nearDist = Infinity;
+  g.droppedFood.forEach(f => {
+    const dx = f.x - pet.scenePos.x;
+    const dy = f.y - pet.scenePos.y;
+    const d = dx * dx + dy * dy;
+    if (d < nearDist) {
+      nearDist = d;
+      nearest = f;
+    }
+  });
+  if (!nearest) return false;
+
+  const dist = Math.sqrt(nearDist);
+  if (dist < 20) {
+    // 吃到了！
+    const foodType = nearest.type;
+    const gains = { worm: 15, fruit: 25, treat: 40 };
+    g.hunger = Math.min(100, g.hunger + (gains[foodType] || 15));
+    g.droppedFood = g.droppedFood.filter(f => f !== nearest);
+    // 吃到的动画效果
+    pet.clickReaction = { type: 'heart', time: 0 };
+    // 文字反馈
+    showToast(`${pet.name} 吃了${foodType === 'worm' ? '虫子' : foodType === 'fruit' ? '水果' : '饲料'}！`);
+    saveGame();
+    return true;
+  }
+
+  // 走向食物——覆盖游走目标
+  pet.wanderTarget = { x: nearest.x, y: nearest.y };
+  pet.wanderSpeed = 1.2;
+  // 面向食物
+  if (nearest.x < pet.scenePos.x) pet.facingRight = false;
+  else pet.facingRight = true;
+  return true;
+}
+
+// ─── 地面食物更新 ───────────────────────────────────────────────
+function updateDroppedFood(dt) {
+  // 更新计时器，移除过期的
+  g.droppedFood = g.droppedFood.filter(f => {
+    f.timer -= dt;
+    return f.timer > 0;
+  });
+}
+
 // ─── Scene helpers: render to any ctx ──────────────────────────
 function drawTextToCtx(targetCtx, x, y, text, color, scale) {
   if (text == null) return;
@@ -3589,6 +3692,8 @@ function loop() {
   } else {
     // 正常渲染当前场景
     drawBg();
+    // 绘制地面食物（在宠物和场景内容之前）
+    drawDroppedFood();
     if (g.currentScene === 'incubator') {
       drawIncubator();
       if (g.isHatching) {
