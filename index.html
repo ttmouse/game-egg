@@ -2,62 +2,96 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥚</text></svg>">
 <title>孵蛋像素版</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 body {
-  background: #0a0a0a;
+  background: #000;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
   font-family: monospace;
   color: #fff;
-  user-select: none;
 }
 #wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  max-width: 100vmin;
+  gap: 8px;
 }
 #c {
   border: 4px solid #444;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  width: 720px;
-  height: 576px;
-  /* 增强文字清晰度 */
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: unset;
   font-smooth: never;
-  /* 确保背景清晰 */
   background: #0a0a0a;
+  /* 保持宽高比，居中显示 */
+  max-width: min(720px, calc(100vw - 16px));
+  max-height: calc(100vh - 160px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 #btns {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   justify-content: center;
-  max-width: 640px;
+  padding: 4px 8px;
+  max-width: 100%;
 }
 .bt {
   background: #222;
   border: 3px solid #555;
   color: #fff;
-  padding: 10px 16px;
+  padding: 8px 10px;
   font-family: monospace;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
-  min-width: 90px;
+  min-width: 70px;
+  min-height: 44px;
   text-align: center;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }
 .bt:hover { background: #333; border-color: #888; }
-.bt:active { background: #444; }
+.bt:active { background: #444; transform: scale(0.96); }
 .bt.off { border-color: #f55; color: #faa; }
 .bt .cooldown { color: #888; font-size: 11px; }
+@media (max-width: 500px) {
+  .bt {
+    min-width: 60px;
+    min-height: 48px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  .bt .cooldown { font-size: 10px; }
+}
 #overlay {
   display: none;
   position: fixed;
@@ -68,23 +102,25 @@ body {
   flex-direction: column;
   gap: 12px;
   z-index: 10;
+  padding: 20px;
 }
 #overlay.show { display: flex; }
 #overlay .msg {
   background: #1a1a2e;
   border: 3px solid #555;
-  padding: 20px 28px;
+  padding: 16px 20px;
   max-width: 360px;
+  width: 100%;
   text-align: center;
   font-size: 14px;
   line-height: 1.7;
 }
 #overlay .msg .title { font-size: 16px; color: #FFD700; margin-bottom: 8px; }
 #overlay .msg .pet { font-size: 18px; color: #FF69B4; margin: 8px 0; }
-#overlay button { padding: 8px 20px; font-family: monospace; }
+#overlay button { padding: 10px 24px; font-family: monospace; font-size: 14px; min-height: 44px; }
 #evt {
   position: fixed;
-  top: 20px;
+  top: max(env(safe-area-inset-top), 20px);
   left: 50%;
   transform: translateX(-50%);
   background: #1a1a2e;
@@ -94,14 +130,14 @@ body {
   display: none;
   z-index: 20;
   text-align: center;
-  max-width: 300px;
+  max-width: min(300px, calc(100vw - 32px));
 }
 #evt.show { display: block; }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <canvas id="c" width="720" height="576"></canvas>
+  <canvas id="c" width="360" height="288"></canvas>
   <div id="btns">
     <button class="bt" id="btnHeat" onclick="toggleHeat()">🔥 加热<br><span class="cooldown" id="heatStatus">开启</span></button>
     <button class="bt" id="btnIce" onclick="toggleIce()">🧊 冰袋<br><span class="cooldown" id="iceStatus">可用</span></button>
@@ -402,6 +438,40 @@ function playSound(name) {
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+
+// 获取画布坐标（支持鼠标和触摸）
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  // rect.width/height 是显示尺寸，canvas.width/height 是实际像素尺寸
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  let clientX, clientY;
+  if (e.touches && e.touches.length > 0) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else if (e.changedTouches && e.changedTouches.length > 0) {
+    clientX = e.changedTouches[0].clientX;
+    clientY = e.changedTouches[0].clientY;
+  } else {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  }
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+// 触摸事件辅助：获取指定触摸点
+function getTouchPoint(e, index = 0) {
+  if (e.touches && e.touches[index]) {
+    return { clientX: e.touches[index].clientX, clientY: e.touches[index].clientY };
+  }
+  if (e.changedTouches && e.changedTouches[index]) {
+    return { clientX: e.changedTouches[index].clientX, clientY: e.changedTouches[index].clientY };
+  }
+  return null;
+}
 
 // 画布点击检测（宠物列表 + 场景切换 + 宠物点击）
 canvas.addEventListener('click', (e) => {
