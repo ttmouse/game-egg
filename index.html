@@ -214,6 +214,8 @@ let g = {
   inventory: { worm: 2, fruit: 1, treat: 0 },
   droppedFood: [],           // 地上的食物 { x, y, type, timer }
   foodDropCd: 0,             // 扔食物冷却
+  discoveredTypes: [],       // 已发现过的宠物类型索引
+  discoveredGenes: [],       // 已发现过的基因名称
   eggs: [{ id: 1, temp: 25, hatch: 0, intimacy: 50 }],
   pets: [],
   nextHatchDay: 0,  // 第几天可以孵化下一只
@@ -1845,6 +1847,7 @@ function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
     moodBubble: { show: false, timer: 0 },
   };
 
+  recordDiscovery(child);
   g.pets.push(child);
   arrangePetsIso(); // 统一网格排列
   g.currentPet = child;
@@ -1999,17 +2002,11 @@ function update(dt) {
     // 冰袋降温：每秒降3度
     g.temp = Math.max(TEMP_MIN, g.temp - 3 * dt);
   } else {
-    // Natural cooling - faster at night
-    const coolRate = g.isDay ? 0.15 : 0.25;
-    g.temp = Math.max(TEMP_MIN, g.temp - coolRate * dt);
-  }
-
-  // 温度极端警告（带冷却，防止无限循环）
-  g._tempWarnCooldown = (g._tempWarnCooldown || 0) - dt;
-  if ((g.temp >= TEMP_MAX || g.temp <= TEMP_MIN) && g._tempWarnCooldown <= 0) {
-    initAudio();
-    playSound('warning');
-    g._tempWarnCooldown = 3; // 3秒冷却
+    // 无加热/冰袋：缓慢趋向室温（25°C），不会无限降温
+    const roomTemp = 25;
+    if (Math.abs(g.temp - roomTemp) > 0.5) {
+      g.temp += (roomTemp - g.temp) * 0.02 * dt;
+    }
   }
 
   // Hatch rate
@@ -2344,6 +2341,7 @@ function finalizeHatch() {
     return;
   }
 
+  recordDiscovery(newPet);
   g.pets.push(newPet);
   arrangePetsIso(); // 统一网格排列
   g.currentPet = g.pets[g.pets.length - 1];
@@ -2527,35 +2525,88 @@ function doFeed() {
   saveGame();
 }
 
+// ─── 图鉴记录 ────────────────────────────────────────────────
+const PET_TYPE_NAMES = ['猫', '狗', '兔子', '狐狸', '鼠', '龙', '鸟', '熊'];
+
+function getPetType(pet) {
+  let h = 0;
+  for (let i = 0; i < pet.name.length; i++) h = (h * 31 + pet.name.charCodeAt(i)) & 0xFFFF;
+  return h % 8;
+}
+
+function recordDiscovery(pet) {
+  const typeIdx = getPetType(pet);
+  if (!g.discoveredTypes.includes(typeIdx)) g.discoveredTypes.push(typeIdx);
+  (pet.genes || []).forEach(gene => {
+    if (!g.discoveredGenes.includes(gene)) g.discoveredGenes.push(gene);
+  });
+}
+
+const PET_EMOJI = ['🐱', '🐶', '🐰', '🦊', '🐭', '🐉', '🐦', '🐻'];
+
 function showAlbum() {
   const overlay = document.getElementById('overlay');
   const msg = document.getElementById('overlayMsg');
-  if (g.pets.length === 0) {
-    msg.innerHTML = '<div class="title">📖 图鉴</div><div style="color:#aaa">还没有孵化过任何宠物</div>';
-  } else {
-    const list = g.pets.map((p, idx) => {
+
+  // 全部8种类型
+  let typeHtml = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0">';
+  for (let i = 0; i < 8; i++) {
+    const discovered = g.discoveredTypes.includes(i);
+    const name = PET_TYPE_NAMES[i];
+    const emoji = PET_EMOJI[i];
+    if (discovered) {
+      typeHtml += `<div style="background:#1a1a2e;border:2px solid #555;border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:28px">${emoji}</div>
+        <div style="color:#FFD700;font-size:12px;margin-top:2px">${name}</div>
+        <div style="color:#4CAF50;font-size:10px">✓ 已发现</div>
+      </div>`;
+    } else {
+      typeHtml += `<div style="background:#111;border:2px solid #333;border-radius:8px;padding:8px;text-align:center;opacity:0.5">
+        <div style="font-size:28px;color:#555">❓</div>
+        <div style="color:#666;font-size:12px;margin-top:2px">???</div>
+        <div style="color:#555;font-size:10px">未发现</div>
+      </div>`;
+    }
+  }
+  typeHtml += '</div>';
+
+  // 已发现基因
+  let geneHtml = '';
+  if (g.discoveredGenes.length > 0) {
+    geneHtml = '<div style="color:#aaa;font-size:11px;margin:6px 0">已发现基因：' +
+      g.discoveredGenes.map(gk => (GENES[gk] || {}).icon || gk).join(' ') + '</div>';
+  }
+
+  // 当前宠物列表
+  let petListHtml = '';
+  if (g.pets.length > 0) {
+    petListHtml = '<div style="border-top:1px solid #333;margin-top:6px;padding-top:6px;max-height:200px;overflow-y:auto">';
+    g.pets.forEach((p, idx) => {
       const canvasId = `pet_sprite_${idx}`;
       const starStr = '★'.repeat(p.star || 1) + '☆'.repeat(5 - (p.star || 1));
       const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('') || '无';
       const daysLeft = p.expireDay - g.dayCount;
-      return `<div onclick="showPetDetail(${idx})" style="margin:4px 0;padding:6px;border-bottom:1px solid #333;display:flex;align-items:center;gap:10px;cursor:pointer">
-        <canvas id="${canvasId}" width="48" height="48" style="image-rendering:pixelated;border:1px solid #444"></canvas>
-        <div>
-          <span style="color:${STAR_COLORS[p.star]};font-size:14px">${p.name}</span>
-          <span style="color:${STAR_COLORS[p.star]};font-size:11px">${starStr}</span>
-          <div style="color:#aaa;font-size:11px;margin-top:1px">${geneStr} · F${p.generation} · Lv${p.level} · 剩${daysLeft}天</div>
-          <div style="color:#666;font-size:10px;margin-top:1px">${p.traits.join('、')}</div>
+      const typeName = PET_TYPE_NAMES[getPetType(p)];
+      petListHtml += `<div onclick="showPetDetail(${idx})" style="padding:4px 0;border-bottom:1px solid #222;display:flex;align-items:center;gap:8px;cursor:pointer">
+        <canvas id="${canvasId}" width="40" height="40" style="image-rendering:pixelated;border:1px solid #444;border-radius:4px"></canvas>
+        <div style="flex:1;min-width:0">
+          <div><span style="color:${STAR_COLORS[p.star]}">${p.name}</span> <span style="color:#666;font-size:10px">${typeName}</span></div>
+          <div style="color:#aaa;font-size:10px">${starStr} · Lv${p.level} · 剩${daysLeft}天</div>
         </div>
       </div>`;
-    }).join('');
-    msg.innerHTML = `<div class="title">📖 图鉴 (${g.pets.length}/${PET_MAX})</div>${list}`;
-    setTimeout(() => {
-      g.pets.forEach((p, idx) => {
-        const c = document.getElementById(`pet_sprite_${idx}`);
-        if (c) drawPetSprite(c, p);
-      });
-    }, 50);
+    });
+    petListHtml += '</div>';
   }
+
+  msg.innerHTML = `<div class="title">📖 图鉴 (${g.discoveredTypes.length}/8)</div>${typeHtml}${geneHtml}${petListHtml}`;
+
+  setTimeout(() => {
+    g.pets.forEach((p, idx) => {
+      const c = document.getElementById(`pet_sprite_${idx}`);
+      if (c) drawPetSprite(c, p);
+    });
+  }, 50);
+
   overlay.classList.add('show');
 }
 
