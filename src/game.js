@@ -2745,7 +2745,7 @@ window.showBattleSelect = function showBattleSelect() {
     const geneStr = (pet.genes||[]).map(gk=>(GENES[gk]||{}).icon||'').join('');
     const restLeft = isResting ? Math.max(0, Math.ceil((pet.restUntil - Date.now())/1000)) : 0;
 
-    html += `<div data-petid="${pet.id}" onclick="toggleBattlePet(${pet.id})" style="
+    html += `<div data-petid="${pet.id}" onclick="toggleBattlePet('${pet.id}')" style="
       background:#1a1a2e;border:2px solid #444;border-radius:8px;padding:6px;cursor:pointer;text-align:center;
       min-height:80px;display:flex;flex-direction:column;align-items:center;gap:2px;opacity:${isResting?'0.4':'1'};
       position:relative;
@@ -2756,7 +2756,7 @@ window.showBattleSelect = function showBattleSelect() {
       <div style="width:90%;height:6px;background:#333;border-radius:3px;overflow:hidden;margin:2px 0">
         <div style="width:${Math.round(hpRatio*100)}%;height:100%;background:${hpColor};transition:width 0.3s"></div>
       </div>
-      <span style="font-size:9px;color:${hpColor}">HP ${pet.hp}/${pet.maxHp}</span>
+      <span style="font-size:9px;color:${hpColor}">HP ${pet.hp||0}/${pet.maxHp||0}</span>
       ${isResting ? `<span style="font-size:9px;color:#f55">休息 ${restLeft}s</span>` : ''}
       <span class="team-badge" data-petid="${pet.id}" style="display:none;font-size:9px;padding:1px 4px;border-radius:3px;position:absolute;top:2px;right:2px;"></span>
     </div>`;
@@ -3148,7 +3148,7 @@ function drawBattle(ctx) {
 
     ctx.fillStyle = '#fff';
     ctx.font = '10px monospace';
-    ctx.fillText(`${pet.hp} / ${pet.maxHp}`, x + 8, y + 78);
+    ctx.fillText(`${pet.hp||0} / ${pet.maxHp||0}`, x + 8, y + 78);
 
     // 死亡标记
     if (!alive) {
