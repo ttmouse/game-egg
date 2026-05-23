@@ -1,4 +1,4 @@
-import { g, saveGame, loadRawSave, initTransCanvases, getPetSpriteCanvas } from './state.js';
+import { g, saveGame, loadRawSave, initTransCanvases } from './state.js';
 import { ctx, canvas, initCanvas } from './canvas.js';
 import {
   DAY_SEC, NGT_SEC, CYCLE, TEMP_MIN, TEMP_MAX, TEMP_OPT_MIN, TEMP_OPT_MAX,
