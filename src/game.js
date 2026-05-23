@@ -442,13 +442,28 @@ window.autoSynth = function() {
       groups[p.star].push(i);
     });
 
-    // 找最低星且 ≥3 只且 <5 星的组合（每组做完后重新分组，因为数组索引会变）
+    // 计算每种类型的宠物数量（用于优先保留稀有品种）
+    const typeCounts = {};
+    g.pets.forEach(p => {
+      const t = getPetType(p);
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+    });
+
+    // 找最低星且 ≥3 只且 <5 星的组合
     const sortedStars = Object.keys(groups).map(Number).sort((a, b) => a - b);
     let found = false;
     for (const star of sortedStars) {
       if (star >= 5) continue;
       if (groups[star].length >= 3) {
-        const idxs = groups[star].slice(0, 3);
+        // 选 3 只同星宠物，按品种稀有度排序（稀有品种作为主合成体 petA）
+        const candidates = groups[star].map(idx => ({
+          idx,
+          typeCount: typeCounts[getPetType(g.pets[idx])] || 999,
+          pet: g.pets[idx]
+        }));
+        candidates.sort((a, b) => a.typeCount - b.typeCount);
+        // 稀有品种做 petA（名字/基因继承给它），其余两个做 petB/petC
+        const idxs = [candidates[0].idx, candidates[1].idx, candidates[2].idx];
         finalizeSynth(g.pets[idxs[0]], idxs[0], g.pets[idxs[1]], idxs[1], g.pets[idxs[2]], idxs[2]);
         totalCount++;
         found = true;
