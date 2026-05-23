@@ -63,6 +63,7 @@ function drawPet(pet, x, y, options = {}) {
   const clickReaction = options.clickReaction || null;
   const petMood = options.petMood || 'normal';
   const moodBubble = options.moodBubble || { show: false };
+  const showExpBar = options.showExpBar || false;
 
   if (isDragging) scale = 1.33 * 1.15;
   let offsetY = 0;
@@ -130,15 +131,17 @@ function drawPet(pet, x, y, options = {}) {
   // Hunger warning
   if (g.hunger < 30) drawText('饿了!', basePx + 45, basePy - 20, P.danger, 1.5);
 
-  // Exp bar
-  const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
-  const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
-  const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
-  const barW = 50;
-  ctx.fillStyle = P.barBg;
-  ctx.fillRect(basePx - barW / 2, basePy - 56, barW, 4);
-  ctx.fillStyle = '#90EE90';
-  ctx.fillRect(basePx - barW / 2, basePy - 56, Math.floor(barW * expProg), 4);
+  // 经验条（仅在鼠标悬停时显示）
+  if (options.showExpBar) {
+    const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
+    const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
+    const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
+    const barW = 50;
+    ctx.fillStyle = P.barBg;
+    ctx.fillRect(basePx - barW / 2, basePy - 56, barW, 4);
+    ctx.fillStyle = '#90EE90';
+    ctx.fillRect(basePx - barW / 2, basePy - 56, Math.floor(barW * expProg), 4);
+  }
 }
 
 function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
@@ -1107,6 +1110,7 @@ function loop() {
               clickReaction: pet.clickReaction || null,
               petMood: pet.petMood || 'normal',
               moodBubble: pet.moodBubble || { show: false },
+              showExpBar: g.hoveredPetId === pet.id,
             });
           }
         });
@@ -1118,7 +1122,7 @@ function loop() {
   }
 
   drawText(g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间', 590, 8, '#aaa', 1);
-  if (hudVisible) drawHUD();
+  drawHUD();
   drawFeedInventory();
   updateBtnUI();
   requestAnimationFrame(loop);
@@ -1192,16 +1196,11 @@ export function init(c, c2d) {
 // 输入处理
 // ═══════════════════════════════════════════════════════════════════
 
-let hudVisible = false;  // HUD 默认隐藏，鼠标悬停时显示
-
 function setupInput(canvasEl) {
   const getCoords = (e) => {
     const rect = canvasEl.getBoundingClientRect();
     return { x: (e.clientX - rect.left) * (720 / rect.width), y: (e.clientY - rect.top) * (576 / rect.height) };
   };
-
-  canvasEl.addEventListener('mouseenter', () => { hudVisible = true; });
-  canvasEl.addEventListener('mouseleave', () => { hudVisible = false; });
 
   canvasEl.addEventListener('click', (e) => {
     const { x: mx, y: my } = getCoords(e);
