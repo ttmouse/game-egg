@@ -14,11 +14,37 @@ import { drawIsoGround, isoToScreen, screenToIso } from './render/ground.js';
 import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim } from './render/egg.js';
 import { drawPetSprite } from './render/pet_sprite.js';
 
-// ═══════════════════════════════════════════════════════════════════
-// 渲染函数
-// ═══════════════════════════════════════════════════════════════════
+// ─── 游戏状态变量（从原始版恢复） ───
 
-// ─── 太阳/月亮 ───
+let ballGame = null
+
+let volleyGame = null
+
+let battlePetTeam = {}
+
+let battleState = null
+
+const petSpriteCache = new Map(); // petId -> { canvas, timestamp }
+
+let toolParticles = []; // 道具粒子效果
+
+function getPetSpriteCanvas(pet) {
+  if (!pet) return null;
+  const cacheKey = pet.id;
+  const cached = petSpriteCache.get(cacheKey);
+  // 缓存10秒，超时重新绘制
+  if (cached && Date.now() - cached.timestamp < 10000) {
+    return cached.canvas;
+  }
+  // 创建新的精灵 canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = 48;
+  canvas.height = 48;
+  drawPetSprite(canvas, pet, 0);
+  petSpriteCache.set(cacheKey, { canvas, timestamp: Date.now() });
+  return canvas;
+}
+
 function drawSunMoon() {
   // Simplified - just draw a static sun icon
   const sx = 640 + CONTENT_OFFSET, sy = 60;
@@ -1397,8 +1423,6 @@ function showGameSelect() {
   overlay.classList.add('show');
 }
 
-window.startBallGame = function() { showToast('⚽ 扔球游戏开发中'); closeOverlay(); };
-window.startVolleyballGame = function() { showToast('🏐 排球游戏开发中'); closeOverlay(); };
 
 // ─── 宠物叫声 ────────────────────────────────────────────────────
 const PET_SOUNDS = ['dog', 'cat', 'rabbit', 'fox', 'mouse', 'dragon', 'bird', 'bear'];
@@ -1827,9 +1851,1885 @@ window.startVoiceCommand = async function() {
 };
 
 // Other stubs
-window.showFeedSelect = function() { showToast('🍖 喂食功能开发中'); };
-window.exitInteractMode = function() { showToast('已退出互动模式'); };
-window.showToolSelect = function() { showToast('🧰 道具功能开发中'); };
-window.cancelToolMode = function() { showToast('已取消'); };
-window.openShop = function() { showToast('🛒 商店功能开发中'); };
-window.buyTool = function() { showToast('购买功能开发中'); };
+// ─── 扔球游戏 ───
+
+window.startBallGame = function() {
+  closeOverlay();
+  if (selectedInteractPets.length === 0) return;
+  initAudio();
+  playSound('pet');
+
+  const pet = g.pets.find(p => p.id === selectedInteractPets[0]);
+  if (!pet) return;
+  // 找宠物当前位置作为起点
+  const petX = pet.scenePos ? pet.scenePos.x : 360;
+  const petY = pet.scenePos ? pet.scenePos.y : 350;
+
+  ballGame = {
+    pet: pet,
+    petX: petX,
+    petY: petY,
+    petTargetX: petX,
+    petTargetY: petY,
+    ball: { x: petX, y: petY - 30, vx: 0, vy: 0, thrown: false, landed: false, landX: 0, landY: 0 },
+    state: 'aim',  // 'aim' | 'throw' | 'chase' | 'catch' | 'miss' | 'done'
+    score: 0,
+    throwsLeft: 5,
+    dragStart: null,
+    dragEnd: null,
+    catchTimer: 0,
+    missTimer: 0,
+    resultTimer: 0,
+    caught: false,
+  };
+  g.interactGame = 'ball';
+}
+
+function updateBallGame(dt) {
+  if (!ballGame) return;
+  const bg = ballGame;
+
+  if (bg.state === 'aim') {
+    // 等待拖拽
+  } else if (bg.state === 'throw') {
+    // 球飞行
+    const b = bg.ball;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.vy += 600 * dt; // 重力
+    // 地面碰撞
+    const groundY = bg.petY;
+    if (b.y >= groundY - 10) {
+      b.y = groundY - 10;
+      b.landed = true;
+      b.landX = b.x;
+      b.landY = b.y;
+      bg.state = 'chase';
+      bg.petTargetX = b.x;
+      bg.petTargetY = b.y;
+      playSound('pet');
+    }
+    // 出界
+    if (b.x < 50 || b.x > 670 || b.y > 580) {
+      bg.state = 'miss';
+      bg.missTimer = 1.5;
+    }
+  } else if (bg.state === 'chase') {
+    // 宠物追球
+    const speed = 180;
+    const dx = bg.petTargetX - bg.petX;
+    const dy = bg.petTargetY - bg.petY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 5) {
+      bg.petX += (dx / dist) * speed * dt;
+      bg.petY += (dy / dist) * speed * dt;
+      // 宠物朝向
+      bg.pet.facingRight = dx > 0;
+    } else {
+      // 到达球位置
+      if (bg.ball.landed) {
+        // 球已落地，错过接球机会
+        bg.state = 'miss';
+        bg.missTimer = 1.0;
+        bg.throwsLeft--;
+        showToast(`球已落地，没接住... ${bg.throwsLeft}次机会`);
+        playSound('warning');
+        if (bg.throwsLeft <= 0) {
+          bg.state = 'done';
+          bg.resultTimer = 2.0;
+        }
+      } else {
+        // 空中接住
+        bg.state = 'catch';
+        bg.catchTimer = 1.0;
+        bg.caught = Math.random() < 0.85; // 85% 概率接住
+      }
+    }
+  } else if (bg.state === 'catch') {
+    bg.catchTimer -= dt;
+    if (bg.catchTimer <= 0) {
+      if (bg.caught) {
+        bg.score++;
+        bg.throwsLeft--;
+        showToast(`接住了！${bg.throwsLeft}次机会`);
+        playSound('levelUp');
+      } else {
+        bg.throwsLeft--;
+        showToast(`没接住... ${bg.throwsLeft}次机会`);
+        playSound('warning');
+      }
+      if (bg.throwsLeft <= 0) {
+        bg.state = 'done';
+        bg.resultTimer = 2.0;
+      } else {
+        // 重置到aim
+        bg.ball.thrown = false;
+        bg.ball.landed = false;
+        bg.ball.x = bg.petX;
+        bg.ball.y = bg.petY - 30;
+        bg.state = 'aim';
+      }
+    }
+  } else if (bg.state === 'miss') {
+    bg.missTimer -= dt;
+    if (bg.missTimer <= 0) {
+      bg.throwsLeft--;
+      showToast(`出界了... ${bg.throwsLeft}次机会`);
+      if (bg.throwsLeft <= 0) {
+        bg.state = 'done';
+        bg.resultTimer = 2.0;
+      } else {
+        bg.ball.thrown = false;
+        bg.ball.landed = false;
+        bg.ball.x = bg.petX;
+        bg.ball.y = bg.petY - 30;
+        bg.state = 'aim';
+      }
+    }
+  } else if (bg.state === 'done') {
+    bg.resultTimer -= dt;
+    if (bg.resultTimer <= 0) {
+      endBallGame();
+    }
+  }
+}
+
+function endBallGame() {
+  const bg = ballGame;
+  if (!bg) return;
+  // 结算奖励
+  const bonus = bg.score * 2;
+  const intimacyGain = bg.score * 10;
+  g.intimacy = Math.min(100, g.intimacy + intimacyGain);
+  addExp(bg.pet, bg.score * 5);
+  g.hunger = Math.max(0, g.hunger - bg.score);
+  showToast(`${bg.pet.name} 扔球结束！接住 ${bg.score} 个，亲密+${intimacyGain}`);
+  playSound('levelUp');
+  saveGame();
+  ballGame = null;
+  g.interactGame = null;
+  selectedInteractPets = [];
+}
+
+function drawBallGame(ctx) {
+  if (!ballGame) return;
+  const bg = ballGame;
+
+  // 背景
+  ctx.fillStyle = '#1a2a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 草地
+  ctx.fillStyle = '#2a4a2a';
+  ctx.fillRect(0, 350, canvas.width, canvas.height - 350);
+  ctx.fillStyle = '#3a5a3a';
+  ctx.fillRect(0, 350, canvas.width, 6);
+
+  // 标题
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText(`⚾ 扔球游戏  剩余 ${bg.throwsLeft} 次  接住 ${bg.score} 个`, 200, 30);
+
+  // 指示文字
+  if (bg.state === 'aim') {
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px monospace';
+    ctx.fillText('拖动抛球！松开后球会飞向拖动方向', 220, 60);
+    // 画拖拽预览线
+    if (bg.dragStart && bg.dragEnd) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(bg.dragStart.x, bg.dragStart.y);
+      ctx.lineTo(bg.dragEnd.x, bg.dragEnd.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // 箭头方向
+      const dx = bg.dragEnd.x - bg.dragStart.x;
+      const dy = bg.dragEnd.y - bg.dragStart.y;
+      ctx.fillStyle = '#FF4500';
+      ctx.beginPath();
+      ctx.arc(bg.dragEnd.x, bg.dragEnd.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 画宠物（简化版）
+  const petCanvas = getPetSpriteCanvas(bg.pet);
+  if (petCanvas) {
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(petCanvas, bg.petX - 24, bg.petY - 48, 48, 48);
+    ctx.restore();
+  }
+
+  // 画球
+  if (bg.ball.thrown || bg.ball.landed) {
+    ctx.fillStyle = '#FF4500';
+    ctx.beginPath();
+    ctx.arc(bg.ball.x, bg.ball.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(bg.ball.x - 3, bg.ball.y - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // 球在宠物手里
+    ctx.fillStyle = '#FF4500';
+    ctx.beginPath();
+    ctx.arc(bg.petX + 20, bg.petY - 40, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 结果提示
+  if (bg.state === 'catch') {
+    ctx.fillStyle = bg.caught ? '#4CAF50' : '#FF4500';
+    ctx.font = 'bold 24px monospace';
+    ctx.fillText(bg.caught ? '🎉 接住了！' : '😢 没接住...', 280, 300);
+  } else if (bg.state === 'done') {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px monospace';
+    ctx.fillText(`🏆 游戏结束！接住 ${bg.score} 个`, 200, 280);
+    ctx.font = '16px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('点击任意处继续...', 280, 320);
+  }
+}
+
+function predictBallAt(ball, t, gravity, netX, netTop, groundY) {
+  let x = ball.x, y = ball.y;
+  let vx = ball.vx, vy = ball.vy;
+  const dt = 0.03;
+  for (let i = 0; i < Math.ceil(t / dt); i++) {
+    vy += gravity * dt;
+    x += vx * dt;
+    y += vy * dt;
+    // 天花板
+    if (y < 30) { y = 30; vy = Math.abs(vy) * 0.6; }
+    // 地面
+    if (y > groundY - 12) { y = groundY - 12; vy = -Math.abs(vy) * 0.65; vx *= 0.75; }
+    // 出界
+    if (x < 15 || x > 705) break;
+    // 触网
+    if (x > netX - 12 && x < netX + 12 && y > netTop) break;
+  }
+  return { x, y };
+}
+
+// ─── 排球游戏 ───
+
+window.startVolleyballGame = function() {
+  closeOverlay();
+  if (selectedInteractPets.length !== 2) return;
+  initAudio();
+  playSound('pet');
+
+  const pet1 = g.pets.find(p => p.id === selectedInteractPets[0]);
+  const pet2 = g.pets.find(p => p.id === selectedInteractPets[1]);
+  if (!pet1 || !pet2) return;
+
+  volleyGame = {
+    pets: [pet1, pet2],
+    pos: [
+      { x: 120, y: 420 },
+      { x: 600, y: 420 }
+    ],
+    ball: { x: 120, y: 380, vx: 0, vy: 0, dragging: false },
+    state: 'serve',
+    scores: [0, 0],
+    serveSide: 0, // 0=左半场先发
+    rallyCount: 0,
+    winner: null,
+    dragStart: null,
+    dragEnd: null,
+    gravity: 600,
+    netX: 360,
+    netTop: 340,
+    groundY: 470,
+    winScore: 5,
+  };
+  g.interactGame = 'volleyball';
+  resetBallToServer();
+}
+
+function resetBallToServer() {
+  const vg = volleyGame;
+  const server = vg.serveSide;
+  const sx = server === 0 ? 120 : 600;
+  vg.pos[server].x = sx;
+  vg.pos[server].y = 420;
+  vg.pos[1 - server].x = server === 0 ? 600 : 120;
+  vg.pos[1 - server].y = 420;
+  vg.ball.x = sx;
+  vg.ball.y = 380;
+  vg.ball.vx = 0;
+  vg.ball.vy = 0;
+  vg.ball.dragging = false;
+  vg.state = 'serve';
+  vg.dragStart = null;
+  vg.dragEnd = null;
+}
+
+function updateVolleyball(dt) {
+  if (!volleyGame) return;
+  const vg = volleyGame;
+
+  if (vg.state === 'done') return;
+
+  // ── 智能接球目标：当球飞行时，预测拦截点 ──
+  if ((vg.state === 'fly' || vg.state === 'hit') && !vg.ball.dragging) {
+    const receiver = 1 - vg.serveSide;
+    const rp = vg.pos[receiver];
+    // 宠物到达 ball 位置的预估时间（按移动速度 200px/s）
+    const distToBall = Math.sqrt((vg.ball.x - rp.x) ** 2 + (vg.ball.y - rp.y) ** 2);
+    const timeToReach = Math.max(0.2, distToBall / 220);
+    const predicted = predictBallAt(vg.ball, timeToReach, vg.gravity, vg.netX, vg.netTop, vg.groundY);
+    // 接球目标：预测球位置，但 y 不低于 200（宠物能跳起来接）
+    vg.catchTarget = vg.catchTarget || [null, null];
+    vg.catchTarget[receiver] = {
+      x: predicted.x,
+      y: Math.max(200, Math.min(vg.groundY - 30, predicted.y))
+    };
+  }
+
+  // 宠物自动移动到接球目标
+  for (let i = 0; i < 2; i++) {
+    const p = vg.pos[i];
+    const target = vg.catchTarget && vg.catchTarget[i] ? vg.catchTarget[i] : null;
+    if (target) {
+      const dx = target.x - p.x;
+      if (Math.abs(dx) > 5) {
+        p.x += (dx > 0 ? 1 : -1) * Math.min(Math.abs(dx), 200 * dt);
+      }
+      const dy = target.y - p.y;
+      if (Math.abs(dy) > 5) {
+        p.y += (dy > 0 ? 1 : -1) * Math.min(Math.abs(dy), 150 * dt);
+      }
+      // 边界
+      if (i === 0) {
+        p.x = Math.max(50, Math.min(vg.netX - 40, p.x));
+      } else {
+        p.x = Math.max(vg.netX + 40, Math.min(670, p.x));
+      }
+      // 宠物可跳起接球：y 下限从 350 改为 200（数值越小跳得越高）
+      p.y = Math.max(200, Math.min(vg.groundY - 30, p.y));
+    }
+  }
+
+  if (vg.state === 'serve') {
+    // 等待拖拽发球
+  } else if (vg.state === 'fly') {
+    const b = vg.ball;
+    b.vy += vg.gravity * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    // 地面反弹
+    if (b.y >= vg.groundY - 12) {
+      b.y = vg.groundY - 12;
+      b.vy = -Math.abs(b.vy) * 0.65;
+      b.vx *= 0.75;
+      playSound('pet');
+      if (Math.abs(b.vy) < 60) {
+        // 球停了，对方得分
+        vg.state = 'miss';
+        const loser = b.x < vg.netX ? 0 : 1;
+        setTimeout(() => scorePointVolley(1 - loser), 800);
+        return;
+      }
+    }
+
+    // 天花板
+    if (b.y < 30) {
+      b.y = 30;
+      b.vy = Math.abs(b.vy) * 0.6;
+    }
+
+    // 出界
+    if (b.x < 15 || b.x > 705) {
+      vg.state = 'miss';
+      const loser = b.x < vg.netX ? 0 : 1;
+      setTimeout(() => scorePointVolley(1 - loser), 800);
+      return;
+    }
+
+    // 触网
+    if (b.x > vg.netX - 12 && b.x < vg.netX + 12 && b.y > vg.netTop) {
+      vg.state = 'miss';
+      const loser = b.x < vg.netX ? 0 : 1;
+      setTimeout(() => scorePointVolley(1 - loser), 800);
+      return;
+    }
+
+    // 对方宠物接球检测
+    const receiver = 1 - vg.serveSide;
+    const rp = vg.pos[receiver];
+    const dx = b.x - rp.x;
+    const dy = b.y - (rp.y - 15);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 38 && b.vy > -50) {
+      // 接住了！反弹回去
+      vg.state = 'hit';
+      vg.rallyCount++;
+      playSound('pet');
+      // 计算反弹方向：向对方半场打
+      const targetX = receiver === 0 ? 550 : 170;
+      const angle = Math.atan2(-200, (targetX - rp.x));
+      const speed = 250 + Math.random() * 80;
+      b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
+      b.vy = Math.sin(angle) * speed;
+      // 交换发球方
+      vg.serveSide = receiver;
+      vg.state = 'fly';
+      // 设定接球目标为发球方（接完球要去接下一次）
+      vg.catchTarget = [null, null];
+      vg.catchTarget[vg.serveSide] = { x: vg.serveSide === 0 ? 120 : 600, y: 400 };
+      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 380 + Math.random() * 60 };
+    }
+
+    // 自己接自己的球？（漏接）
+    const server = vg.serveSide;
+    const sp = vg.pos[server];
+    const sdx = b.x - sp.x;
+    const sdy = b.y - (sp.y - 15);
+    const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
+    if (sdist < 38 && b.vy > -50 && vg.rallyCount === 0) {
+      // 发球失误，直接丢分
+      vg.state = 'miss';
+      setTimeout(() => scorePointVolley(1 - server), 800);
+    }
+  } else if (vg.state === 'hit') {
+    // 球飞行中，等待下一次接球或得分
+    const b = vg.ball;
+    b.vy += vg.gravity * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    if (b.y >= vg.groundY - 12) {
+      b.y = vg.groundY - 12;
+      b.vy = -Math.abs(b.vy) * 0.65;
+      b.vx *= 0.75;
+      playSound('pet');
+      if (Math.abs(b.vy) < 60) {
+        vg.state = 'miss';
+        const loser = b.x < vg.netX ? 0 : 1;
+        setTimeout(() => scorePointVolley(1 - loser), 800);
+        return;
+      }
+    }
+    if (b.y < 30) { b.y = 30; b.vy = Math.abs(b.vy) * 0.6; }
+    if (b.x < 15 || b.x > 705) {
+      vg.state = 'miss';
+      const loser = b.x < vg.netX ? 0 : 1;
+      setTimeout(() => scorePointVolley(1 - loser), 800);
+      return;
+    }
+    if (b.x > vg.netX - 12 && b.x < vg.netX + 12 && b.y > vg.netTop) {
+      vg.state = 'miss';
+      const loser = b.x < vg.netX ? 0 : 1;
+      setTimeout(() => scorePointVolley(1 - loser), 800);
+      return;
+    }
+
+    // 接球检测
+    const receiver = 1 - vg.serveSide;
+    const rp = vg.pos[receiver];
+    const dx = b.x - rp.x;
+    const dy = b.y - (rp.y - 15);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 38 && b.vy > -50) {
+      vg.state = 'hit';
+      vg.rallyCount++;
+      playSound('pet');
+      const targetX = receiver === 0 ? 550 : 170;
+      const angle = Math.atan2(-200, (targetX - rp.x));
+      const speed = 280 + Math.random() * 80;
+      b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
+      b.vy = Math.sin(angle) * speed;
+      vg.serveSide = receiver;
+      vg.catchTarget = [null, null];
+      vg.catchTarget[vg.serveSide] = { x: vg.serveSide === 0 ? 120 : 600, y: 400 };
+      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 380 + Math.random() * 60 };
+    }
+  }
+}
+
+function scorePointVolley(winnerIdx) {
+  const vg = volleyGame;
+  if (!vg || vg.state === 'done') return;
+  vg.scores[winnerIdx]++;
+  playSound('warning');
+
+  if (vg.scores[winnerIdx] >= vg.winScore) {
+    vg.winner = winnerIdx;
+    vg.state = 'done';
+    showToast(`🏆 ${vg.pets[winnerIdx].name} 获胜！`);
+    addExp(vg.pets[winnerIdx], 20);
+    addExp(vg.pets[1 - winnerIdx], 8);
+    saveGame();
+  } else {
+    showToast(`${vg.pets[winnerIdx].name} 得一分！${vg.scores[0]}-${vg.scores[1]}`);
+    // 丢分方发球
+    vg.serveSide = 1 - winnerIdx;
+    vg.rallyCount = 0;
+    vg.catchTarget = [null, null];
+    setTimeout(() => {
+      if (volleyGame) resetBallToServer();
+    }, 1000);
+  }
+}
+
+function endVolleyballGame() {
+  volleyGame = null;
+  g.interactGame = null;
+  selectedInteractPets = [];
+}
+
+function drawVolleyballGame(ctx) {
+  if (!volleyGame) return;
+  const vg = volleyGame;
+
+  // 天空
+  ctx.fillStyle = '#1a2a4a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 地面
+  ctx.fillStyle = '#2a6a2a';
+  ctx.fillRect(0, vg.groundY, canvas.width, canvas.height - vg.groundY);
+  ctx.fillStyle = '#3a8a3a';
+  ctx.fillRect(0, vg.groundY, canvas.width, 6);
+
+  // 场地线
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(20, vg.groundY + 5, 680, 96);
+
+  // 网
+  ctx.fillStyle = '#bbb';
+  ctx.fillRect(vg.netX - 2, vg.netTop - 5, 4, vg.groundY - vg.netTop + 5);
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  for (let ny = vg.netTop; ny < vg.groundY; ny += 18) {
+    ctx.beginPath();
+    ctx.moveTo(vg.netX - 18, ny);
+    ctx.lineTo(vg.netX + 18, ny);
+    ctx.stroke();
+  }
+
+  // 分数
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px monospace';
+  ctx.fillText(`${vg.pets[0].name}: ${vg.scores[0]}`, 40, 38);
+  ctx.fillText(`${vg.pets[1].name}: ${vg.scores[1]}`, 480, 38);
+  ctx.font = '13px monospace';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(`回合 ${vg.rallyCount}`, 310, 38);
+
+  // 发球提示
+  if (vg.state === 'serve') {
+    const server = vg.serveSide;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText(`拖动球发球 →`, vg.pos[server].x - 50, vg.pos[server].y - 65);
+  }
+
+  // 拖拽预览轨迹
+  if (vg.dragStart && vg.dragEnd && vg.state === 'serve') {
+    const ds = vg.dragStart;
+    const de = vg.dragEnd;
+    const dx = de.x - ds.x;
+    const dy = de.y - ds.y;
+    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 2.5, 500);
+    const angle = Math.atan2(dy, dx);
+
+    // 预测轨迹点
+    ctx.strokeStyle = 'rgba(255,200,0,0.5)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    let px = vg.ball.x, py = vg.ball.y;
+    let pvx = Math.cos(angle) * power;
+    let pvy = Math.sin(angle) * power;
+    ctx.moveTo(px, py);
+    for (let t = 0; t < 40; t++) {
+      pvy += vg.gravity * 0.03;
+      px += pvx * 0.03;
+      py += pvy * 0.03;
+      if (py > vg.groundY - 12) break;
+      if (px < 10 || px > 710) break;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 箭头
+    ctx.fillStyle = '#FF6600';
+    ctx.beginPath();
+    ctx.arc(de.x, de.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 宠物
+  for (let i = 0; i < 2; i++) {
+    const petCanvas = getPetSpriteCanvas(vg.pets[i]);
+    if (petCanvas) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(petCanvas, vg.pos[i].x - 24, vg.pos[i].y - 48, 48, 48);
+      ctx.restore();
+    }
+    ctx.fillStyle = STAR_COLORS[vg.pets[i].star] || '#aaa';
+    ctx.font = '11px monospace';
+    ctx.fillText(vg.pets[i].name, vg.pos[i].x - 22, vg.pos[i].y - 52);
+  }
+
+  // 排球
+  const b = vg.ball;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(b.x - 12, b.y);
+  ctx.lineTo(b.x + 12, b.y);
+  ctx.moveTo(b.x, b.y - 12);
+  ctx.lineTo(b.x, b.y + 12);
+  ctx.stroke();
+
+  // 提示
+  if (vg.state === 'done') {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px monospace';
+    ctx.fillText(`🏆 ${vg.pets[vg.winner].name} 获胜！`, 180, 260);
+    ctx.font = '15px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('点击任意处结束', 280, 300);
+  }
+}
+
+function onVolleyDragStart(x, y) {
+  if (!volleyGame || volleyGame.state !== 'serve') return;
+  const vg = volleyGame;
+  const b = vg.ball;
+  const dx = x - b.x, dy = y - b.y;
+  if (Math.sqrt(dx * dx + dy * dy) < 35) {
+    vg.ball.dragging = true;
+    vg.dragStart = { x, y };
+    vg.dragEnd = { x, y };
+  }
+}
+
+function onVolleyDragMove(x, y) {
+  if (!volleyGame || !volleyGame.ball.dragging) return;
+  volleyGame.dragEnd = { x, y };
+}
+
+function onVolleyDragEnd() {
+  if (!volleyGame || !volleyGame.ball.dragging) return;
+  const vg = volleyGame;
+  const ds = vg.dragStart;
+  const de = vg.dragEnd;
+  if (ds && de) {
+    const dx = de.x - ds.x;
+    const dy = de.y - ds.y;
+    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 2.5, 500);
+    const angle = Math.atan2(dy, dx);
+    vg.ball.vx = Math.cos(angle) * power;
+    vg.ball.vy = Math.sin(angle) * power;
+    vg.state = 'fly';
+    // 设定接球目标
+    const receiver = 1 - vg.serveSide;
+    vg.catchTarget = [null, null];
+    vg.catchTarget[receiver] = { x: receiver === 0 ? 200 + Math.random() * 200 : 320 + Math.random() * 200, y: 380 + Math.random() * 60 };
+    playSound('pet');
+  }
+  vg.ball.dragging = false;
+  vg.dragStart = null;
+  vg.dragEnd = null;
+}
+
+// ─── 战斗系统 ───
+
+function showBattleSelect() {
+  closeOverlay();
+  initAudio();
+
+  const availablePets = g.pets.filter(p => p.restUntil <= Date.now());
+
+  let html = '<div style="font-size:13px;margin-bottom:6px;text-align:center">⚔️ 宠物战斗 — 分配队伍</div>';
+  html += '<div style="font-size:11px;color:#aaa;margin-bottom:8px;text-align:center">点击宠物切换队伍（蓝=A队 / 红=B队）</div>';
+
+  // 顶部：队伍信息
+  html += '<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px">';
+  html += '<span style="color:#64B5F6">🔵 A队：<b id="teamAcount">0</b>只</span>';
+  html += '<span style="color:#EF5350">🔴 B队：<b id="teamBcount">0</b>只</span>';
+  html += '</div>';
+
+  // 宠物网格
+  html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;max-height:300px;overflow-y:auto;margin-bottom:10px;" id="battlePetGrid">';
+
+  g.pets.forEach(pet => {
+    const isResting = pet.restUntil > Date.now();
+    const hpRatio = pet.hp / pet.maxHp;
+    const hpColor = getHpColor(hpRatio);
+    const geneStr = (pet.genes||[]).map(gk=>(GENES[gk]||{}).icon||'').join('');
+    const restLeft = isResting ? Math.max(0, Math.ceil((pet.restUntil - Date.now())/1000)) : 0;
+
+    html += `<div data-petid="${pet.id}" onclick="toggleBattlePet(${pet.id})" style="
+      background:#1a1a2e;border:2px solid #444;border-radius:8px;padding:6px;cursor:pointer;text-align:center;
+      min-height:80px;display:flex;flex-direction:column;align-items:center;gap:2px;opacity:${isResting?'0.4':'1'};
+      position:relative;
+    ">
+      <span style="font-size:12px;font-weight:bold;color:#fff">${pet.name}</span>
+      <span style="font-size:9px;color:#aaa">${pet.star}★ Lv${pet.level}</span>
+      <span style="font-size:10px">${geneStr}</span>
+      <div style="width:90%;height:6px;background:#333;border-radius:3px;overflow:hidden;margin:2px 0">
+        <div style="width:${Math.round(hpRatio*100)}%;height:100%;background:${hpColor};transition:width 0.3s"></div>
+      </div>
+      <span style="font-size:9px;color:${hpColor}">HP ${pet.hp}/${pet.maxHp}</span>
+      ${isResting ? `<span style="font-size:9px;color:#f55">休息 ${restLeft}s</span>` : ''}
+      <span class="team-badge" data-petid="${pet.id}" style="display:none;font-size:9px;padding:1px 4px;border-radius:3px;position:absolute;top:2px;right:2px;"></span>
+    </div>`;
+  });
+
+  html += '</div>';
+
+  // 队伍分配区
+  html += '<div style="display:flex;gap:8px;margin-bottom:10px;">';
+  html += '<div style="flex:1;background:#0d1b2a;border:2px solid #64B5F6;border-radius:6px;padding:6px;min-height:50px" id="teamASlot">';
+  html += '<div style="font-size:10px;color:#64B5F6;margin-bottom:4px">🔵 A队</div>';
+  html += '<div id="teamAlist" style="font-size:10px;color:#aaa;min-height:20px"></div></div>';
+  html += '<div style="flex:1;background:#2a0d0d;border:2px solid #EF5350;border-radius:6px;padding:6px;min-height:50px" id="teamBSlot">';
+  html += '<div style="font-size:10px;color:#EF5350;margin-bottom:4px">🔴 B队</div>';
+  html += '<div id="teamBlist" style="font-size:10px;color:#aaa;min-height:20px"></div></div>';
+  html += '</div>';
+
+  // 按钮
+  html += '<div style="display:flex;gap:8px;justify-content:center;">';
+  html += '<button id="battleStartBtn" onclick="startBattle()" disabled style="background:#333;border:2px solid #555;color:#555;padding:10px 20px;font-family:monospace;font-size:13px;cursor:not-allowed">开始战斗</button>';
+  html += '<button onclick="cancelBattle()" style="background:#333;border:2px solid #666;color:#fff;padding:10px 20px;font-family:monospace;font-size:13px;cursor:pointer">返回</button>';
+  html += '</div>';
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = html;
+  msg.style.maxWidth = '520px';
+  overlay.classList.add('show');
+
+  // 初始化选中状态（如果battleState有数据）
+  if (battleState && battleState.preselected) {
+    battleState.preselected.forEach(id => toggleBattlePet(id, true));
+    battleState.preselected = null;
+  }
+
+  updateBattleTeamUI();
+}
+
+function toggleBattlePet(petId, silent) {
+  const pet = g.pets.find(p => p.id === petId);
+  if (!pet || pet.restUntil > Date.now()) return;
+
+  const current = battlePetTeam[petId];
+  if (!current) {
+    battlePetTeam[petId] = 'A';
+  } else if (current === 'A') {
+    battlePetTeam[petId] = 'B';
+  } else {
+    delete battlePetTeam[petId];
+  }
+
+  if (!silent) updateBattleTeamUI();
+}
+
+function updateBattleTeamUI() {
+  const teamA = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'A').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
+  const teamB = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'B').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
+
+  document.getElementById('teamAcount').textContent = teamA.length;
+  document.getElementById('teamBcount').textContent = teamB.length;
+  document.getElementById('teamAlist').textContent = teamA.map(p => p.name).join('、') || '空';
+  document.getElementById('teamBlist').textContent = teamB.map(p => p.name).join('、') || '空';
+
+  // 更新卡片样式
+  g.pets.forEach(pet => {
+    const card = document.querySelector(`[data-petid="${pet.id}"]`);
+    if (!card) return;
+    const team = battlePetTeam[pet.id];
+    card.style.borderColor = team === 'A' ? '#64B5F6' : team === 'B' ? '#EF5350' : '#444';
+    card.style.background = team === 'A' ? '#0d1b2a' : team === 'B' ? '#2a0d0d' : '#1a1a2e';
+
+    const badge = card.querySelector('.team-badge');
+    if (badge) {
+      if (team) {
+        badge.style.display = 'block';
+        badge.style.background = team === 'A' ? '#64B5F6' : '#EF5350';
+        badge.textContent = team;
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+  });
+
+  // 更新开始按钮
+  const btn = document.getElementById('battleStartBtn');
+  if (btn) {
+    const canStart = teamA.length >= 1 && teamB.length >= 1 && (teamA.length + teamB.length) <= 4;
+    btn.disabled = !canStart;
+    btn.style.background = canStart ? '#1a3a1a' : '#333';
+    btn.style.borderColor = canStart ? '#4CAF50' : '#555';
+    btn.style.color = canStart ? '#fff' : '#555';
+    btn.style.cursor = canStart ? 'pointer' : 'not-allowed';
+  }
+}
+
+window.cancelBattle = function() {
+  battlePetTeam = {};
+  battleState = null;
+  document.getElementById('overlayMsg').style.maxWidth = '360px';
+  closeOverlay();
+  setTimeout(() => showGameSelect(), 50);
+}
+
+function startBattle() {
+  const teamA = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'A').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
+  const teamB = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'B').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
+
+  if (teamA.length === 0 || teamB.length === 0) return;
+
+  // 重置HP（从当前HP开始，允许战斗内回复）
+  const allPets = [...teamA, ...teamB];
+  allPets.forEach(p => {
+    p._origHp = p.hp; // 记录战斗前HP
+  });
+
+  // 初始HP赋值（如果未初始化）
+  allPets.forEach(p => { if (!p.maxHp) p.maxHp = p.star * 25; if (!p.hp || p.hp <= 0) p.hp = p.maxHp; });
+
+  // 按速度排序（level+star高的先）
+  allPets.sort((a, b) => (b.level + b.star) - (a.level + a.star));
+
+  const teamAPetIds = new Set(teamA.map(p => p.id));
+  const turnOrder = [...allPets];
+
+  battleState = {
+    state: 'battle',     // battle | anim | result
+    teamA,
+    teamB,
+    teamAPetIds,
+    turnOrder,
+    turnIndex: 0,        // 当前行动宠物在turnOrder中的索引
+    round: 1,
+    log: [],              // 战斗日志 [{text, color}]
+    winner: null,
+    // 动画状态
+    animPhase: 'skillSelect',  // skillSelect | targeting | anim | nextTurn | result
+    turnTimer: 0,
+    curAttacker: null,
+    curSkill: null,
+    curTarget: null,
+    damageDisplay: null,  // { x, y, text, timer, color }
+    resultMsg: '',
+    skillBtns: [],       // [{ skillKey, x, y, w, h }]
+    targetBtns: [],      // [{ petId, x, y, w, h }]
+  };
+
+  nextBattleTurn();
+  document.getElementById('overlayMsg').style.maxWidth = '360px';
+  closeOverlay();
+  g.interactGame = 'battle';
+}
+
+function nextBattleTurn() {
+  const alive = battleState.turnOrder.filter(p => p.hp > 0);
+  if (alive.length <= 1) {
+    endBattle();
+    return;
+  }
+
+  // 找到下一个存活的宠物
+  let attempts = 0;
+  while (attempts < battleState.turnOrder.length) {
+    const pet = battleState.turnOrder[battleState.turnIndex];
+    battleState.turnIndex = (battleState.turnIndex + 1) % battleState.turnOrder.length;
+    attempts++;
+    if (pet && pet.hp > 0) {
+      battleState.curAttacker = pet;
+      battleState.curSkill = null;
+      battleState.curTarget = null;
+      battleState.animPhase = 'skillSelect';
+      battleState.turnTimer = 0;
+      return;
+    }
+  }
+
+  // 所有宠物都死了 → 下一轮
+  battleState.round++;
+  battleState.turnIndex = 0;
+  nextBattleTurn();
+}
+
+function doBattleSkill(skillKey) {
+  const attacker = battleState.curAttacker;
+  if (!attacker || battleState.animPhase !== 'skillSelect') return;
+
+  const skills = getPetSkills(attacker);
+  const skill = skills.find(s => s.key === skillKey) || skills[0];
+  battleState.curSkill = skill;
+  battleState.animPhase = 'targeting';
+}
+
+function doBattleTarget(targetPetId) {
+  if (battleState.animPhase !== 'targeting') return;
+  const target = battleState.turnOrder.find(p => p.id === targetPetId);
+  if (!target || target.hp <= 0) return;
+
+  battleState.curTarget = target;
+  battleState.animPhase = 'animating';
+  battleState.turnTimer = 0;
+
+  // 立即执行技能效果
+  executeBattleAction();
+}
+
+function executeBattleAction() {
+  const attacker = battleState.curAttacker;
+  const skill = battleState.curSkill;
+  const target = battleState.curTarget;
+  if (!attacker || !skill || !target) { nextBattleTurn(); return; }
+
+  let logText = '';
+  let logColor = '#fff';
+
+  if (skill.type === 'heal') {
+    const healAmt = Math.round(attacker.maxHp * 0.3);
+    attacker.hp = Math.min(attacker.maxHp, attacker.hp + healAmt);
+    logText = `${attacker.name} 使用了${skill.name}，回复了 ${healAmt} HP！`;
+    logColor = '#4CAF50';
+    battleState.damageDisplay = { x: 360, y: 200, text: `+${healAmt}`, color: '#4CAF50', timer: 0 };
+  } else {
+    const dmg = calcDamage(skill, attacker, target);
+    target.hp = Math.max(0, target.hp - dmg);
+    attacker.exp = (attacker.exp || 0) + 2; // 回合经验
+
+    const isEffective = getTypeMultiplier(skill.element, (target.genes&&target.genes[0])) > 1;
+    logText = `${attacker.name} 对 ${target.name} 使用了${skill.name}，造成了 ${dmg} 点伤害！${isEffective?' 效果拔群！':''}`;
+    logColor = isEffective ? '#FF9800' : '#fff';
+    battleState.damageDisplay = { x: 360, y: 180, text: `-${dmg}`, color: '#E53935', timer: 0 };
+  }
+
+  battleState.log.unshift({ text: logText, color: logColor });
+  if (battleState.log.length > 5) battleState.log.pop();
+
+  // 检查目标是否倒下
+  if (target.hp <= 0) {
+    battleState.log.unshift({ text: `${target.name} 倒下了！`, color: '#f55' });
+  }
+
+  battleState.animPhase = 'waiting';
+  battleState.turnTimer = 0;
+}
+
+function endBattle() {
+  battleState.animPhase = 'result';
+
+  const aliveA = countAlive(battleState.teamA);
+  const aliveB = countAlive(battleState.teamB);
+
+  if (aliveA > 0 && aliveB === 0) {
+    battleState.winner = 'A';
+    battleState.resultMsg = '🔵 A队获胜！';
+    // 奖励
+    battleState.teamA.forEach(p => {
+      if (p.hp > 0) {
+        addExp(p, 20);
+        g.intimacy = Math.min(100, g.intimacy + 10);
+      } else {
+        p.hp = 0;
+        p.restUntil = Date.now() + 3600 * 1000;
+      }
+    });
+    battleState.teamB.forEach(p => {
+      p.hp = 0;
+      p.restUntil = Date.now() + 3600 * 1000;
+    });
+  } else if (aliveB > 0 && aliveA === 0) {
+    battleState.winner = 'B';
+    battleState.resultMsg = '🔴 B队获胜！';
+    battleState.teamB.forEach(p => {
+      if (p.hp > 0) {
+        addExp(p, 20);
+        g.intimacy = Math.min(100, g.intimacy + 10);
+      } else {
+        p.hp = 0;
+        p.restUntil = Date.now() + 3600 * 1000;
+      }
+    });
+    battleState.teamA.forEach(p => {
+      p.hp = 0;
+      p.restUntil = Date.now() + 3600 * 1000;
+    });
+  } else {
+    battleState.winner = 'draw';
+    battleState.resultMsg = '🤝 平局！';
+  }
+
+  saveGame();
+}
+
+function exitBattle() {
+  battleState = null;
+  battlePetTeam = {};
+  g.interactGame = null;
+}
+
+function updateBattle(dt) {
+  if (!battleState) return;
+
+  // 伤害数字飘字
+  if (battleState.damageDisplay) {
+    battleState.damageDisplay.timer += dt;
+    if (battleState.damageDisplay.timer > 1.5) {
+      battleState.damageDisplay = null;
+    }
+  }
+
+  // 等待动画结束后自动切换下一回合
+  if (battleState.animPhase === 'waiting') {
+    battleState.turnTimer += dt;
+    if (battleState.turnTimer >= 1.0) {
+      nextBattleTurn();
+    }
+  }
+}
+
+function drawBattle(ctx) {
+  if (!battleState) return;
+
+  // 背景
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // 地面装饰
+  ctx.fillStyle = '#1a2a1a';
+  ctx.fillRect(0, 480, canvas.width, canvas.height - 480);
+  ctx.strokeStyle = '#2a3a2a';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < canvas.width; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 480); ctx.lineTo(x + 20, canvas.height); ctx.stroke();
+  }
+
+  // 中央分隔线
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.setLineDash([8,8]);
+  ctx.beginPath(); ctx.moveTo(360, 60); ctx.lineTo(360, 470); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 队伍标签
+  ctx.fillStyle = '#64B5F6';
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('🔵 A队', 20, 30);
+  ctx.fillStyle = '#EF5350';
+  ctx.fillText('🔴 B队', 620, 30);
+  ctx.fillStyle = '#fff';
+  ctx.font = '11px monospace';
+  ctx.fillText(`第 ${battleState.round} 回合`, 320, 30);
+
+  // 绘制宠物（两侧）
+  const drawPetCard = (pet, x, y, isLeft, isActive) => {
+    if (!pet) return;
+
+    const alive = pet.hp > 0;
+    const hpRatio = alive ? pet.hp / pet.maxHp : 0;
+    const hpColor = getHpColor(hpRatio);
+    const borderColor = isActive ? '#FFD700' : alive ? (battleState.teamAPetIds.has(pet.id) ? '#64B5F6' : '#EF5350') : '#333';
+
+    // 卡片背景
+    ctx.fillStyle = alive ? 'rgba(26,26,46,0.95)' : 'rgba(20,20,20,0.8)';
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = isActive ? 3 : 2;
+    roundRect(ctx, x, y, 140, 100, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // 名字
+    ctx.fillStyle = alive ? '#fff' : '#666';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(pet.name, x + 8, y + 18);
+
+    // 星级
+    ctx.fillStyle = STAR_COLORS[pet.star] || '#aaa';
+    ctx.font = '11px monospace';
+    ctx.fillText('★'.repeat(pet.star), x + 8, y + 34);
+
+    // 基因图标
+    const geneStr = (pet.genes||[]).map(gk=>(GENES[gk]||{}).icon||'').join('');
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px monospace';
+    ctx.fillText(geneStr, x + 8, y + 50);
+
+    // HP条
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x + 8, y + 56, 124, 10);
+    ctx.fillStyle = hpColor;
+    ctx.fillRect(x + 8, y + 56, Math.round(124 * hpRatio), 10);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 8, y + 56, 124, 10);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px monospace';
+    ctx.fillText(`${pet.hp} / ${pet.maxHp}`, x + 8, y + 78);
+
+    // 死亡标记
+    if (!alive) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(x, y, 140, 100);
+      ctx.fillStyle = '#f55';
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText('倒下', x + 40, y + 55);
+    }
+
+    // 存活指示点
+    if (alive) {
+      ctx.fillStyle = '#4CAF50';
+      ctx.beginPath();
+      ctx.arc(isLeft ? x + 8 : x + 132, y + 90, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  // A队（左侧，x=10开始）
+  battleState.teamA.forEach((pet, i) => {
+    drawPetCard(pet, 10, 50 + i * 115, true, battleState.curAttacker && battleState.curAttacker.id === pet.id);
+  });
+  // B队（右侧，x=570开始）
+  battleState.teamB.forEach((pet, i) => {
+    drawPetCard(pet, 570, 50 + i * 115, false, battleState.curAttacker && battleState.curAttacker.id === pet.id);
+  });
+
+  // 伤害飘字
+  if (battleState.damageDisplay) {
+    const dd = battleState.damageDisplay;
+    const alpha = Math.max(0, 1 - dd.timer / 1.5);
+    const offsetY = -dd.timer * 40;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = dd.color;
+    ctx.font = 'bold 28px monospace';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(dd.text, dd.x - 30, dd.y + offsetY);
+    ctx.fillText(dd.text, dd.x - 30, dd.y + offsetY);
+    ctx.globalAlpha = 1;
+  }
+
+  // 战斗日志（右侧）
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(460, 200, 250, 150);
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(460, 200, 250, 150);
+  battleState.log.forEach((entry, i) => {
+    ctx.fillStyle = entry.color;
+    ctx.font = '11px monospace';
+    ctx.fillText(entry.text, 468, 218 + i * 22);
+  });
+
+  // 技能选择UI（底部）
+  drawBattleSkillUI(ctx);
+
+  // 结果界面
+  if (battleState.animPhase === 'result') {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 32px monospace';
+    ctx.fillText(battleState.resultMsg, 360 - ctx.measureText(battleState.resultMsg).width / 2, 250);
+    ctx.fillStyle = '#fff';
+    ctx.font = '14px monospace';
+    ctx.fillText('奖励已发放！败者休息1小时', 360 - 110, 285);
+
+    // 按钮
+    drawBattleResultBtn(ctx, '🔄 再来一局', 280, 320, () => { exitBattle(); battlePetTeam = {}; setTimeout(() => showBattleSelect(), 100); });
+    drawBattleResultBtn(ctx, '🚪 退出', 420, 320, () => { exitBattle(); battlePetTeam = {}; });
+  }
+}
+
+function drawBattleSkillUI(ctx) {
+  if (battleState.animPhase === 'result') return;
+  if (!battleState.curAttacker) return;
+
+  const attacker = battleState.curAttacker;
+  const alive = attacker.hp > 0;
+
+  // 底部面板
+  ctx.fillStyle = 'rgba(15,15,30,0.95)';
+  ctx.fillRect(0, 400, canvas.width, canvas.height - 400);
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(canvas.width, 400); ctx.stroke();
+
+  if (battleState.animPhase === 'skillSelect' && alive) {
+    // 显示当前行动宠物
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(`${attacker.name} 的回合！选择技能：`, 20, 425);
+
+    const skills = getPetSkills(attacker);
+    battleState.skillBtns = [];
+    skills.forEach((skill, i) => {
+      const sx = 20 + i * 175;
+      const sy = 435;
+      const sw = 165;
+      const sh = 60;
+
+      ctx.fillStyle = skill.type === 'heal' ? '#1a3a1a' : '#1a1a3a';
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 2;
+      roundRect(ctx, sx, sy, sw, sh, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px monospace';
+      ctx.fillText(skill.icon, sx + 8, sy + 22);
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(skill.name, sx + 36, sy + 18);
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px monospace';
+      ctx.fillText(skill.desc, sx + 36, sy + 34);
+      ctx.fillStyle = skill.type === 'heal' ? '#4CAF50' : '#FF9800';
+      ctx.fillText(skill.type === 'heal' ? `回复30%` : `威力${skill.power}`, sx + 36, sy + 50);
+
+      battleState.skillBtns.push({ skillKey: skill.key, x: sx, y: sy, w: sw, h: sh });
+    });
+  } else if (battleState.animPhase === 'targeting' && battleState.curSkill) {
+  const skill = battleState.curSkill;
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText(`选择目标（${attacker.name} 使用 ${skill.name}）：`, 20, 425);
+
+  // 显示可 targeting 的宠物（对方存活的）
+  const opponents = battleState.turnOrder.filter(p =>
+    p.hp > 0 && p.id !== attacker.id
+  );
+  battleState.targetBtns = [];
+  opponents.forEach((pet, i) => {
+    const sx = 20 + i * 175;
+    const sy = 435;
+    const hpRatio = pet.hp / pet.maxHp;
+    const hpColor = getHpColor(hpRatio);
+
+    ctx.fillStyle = '#1a1a3a';
+    ctx.strokeStyle = '#E53935';
+    ctx.lineWidth = 2;
+    roundRect(ctx, sx, sy, 165, 60, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(pet.name, sx + 8, sy + 18);
+    ctx.font = '10px monospace';
+    ctx.fillStyle = hpColor;
+    ctx.fillText(`HP ${pet.hp}/${pet.maxHp}`, sx + 8, sy + 36);
+
+      // HP条
+      ctx.fillStyle = '#333';
+      ctx.fillRect(sx + 8, sy + 42, 140, 8);
+      ctx.fillStyle = hpColor;
+      ctx.fillRect(sx + 8, sy + 42, Math.round(140 * hpRatio), 8);
+
+      battleState.targetBtns.push({ petId: pet.id, x: sx, y: sy, w: 165, h: 60 });
+    });
+  } else if (battleState.animPhase === 'animating' || battleState.animPhase === 'waiting') {
+    ctx.fillStyle = '#aaa';
+    ctx.font = '13px monospace';
+    const skill = battleState.curSkill;
+    const target = battleState.curTarget;
+    if (skill && target) {
+      ctx.fillText(`${attacker.name} 对 ${target.name} 使用了 ${skill.name}...`, 20, 425);
+    }
+    // 进度条
+    const prog = Math.min(1, battleState.turnTimer / 1.0);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(20, 435, 680, 12);
+    ctx.fillStyle = '#4CAF50';
+    ctx.fillRect(20, 435, Math.round(680 * prog), 12);
+  }
+}
+
+function drawBattleResultBtn(ctx, text, x, y, onclick) {
+  const w = 100, h = 40;
+  ctx.fillStyle = '#1a3a1a';
+  ctx.strokeStyle = '#4CAF50';
+  ctx.lineWidth = 2;
+  roundRect(ctx, x, y, w, h, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = '13px monospace';
+  ctx.fillText(text, x + 8, y + 26);
+  // 存储按钮区域（供点击用）
+  if (!window._battleResultBtns) window._battleResultBtns = [];
+  window._battleResultBtns.push({ x, y, w, h, onclick });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function getElementSkillForGene(gene) {
+  const map = {
+    water:   { name:'水炮',   icon:'🌊', power:50, element:'water' },
+    fire:    { name:'火焰牙', icon:'🔥', power:50, element:'fire' },
+    grass:   { name:'藤鞭',   icon:'🌿', power:50, element:'grass' },
+    electric:{ name:'雷电',   icon:'⚡', power:50, element:'electric' },
+    ice:     { name:'冰息',   icon:'❄️', power:50, element:'ice' },
+    dark:    { name:'暗影球', icon:'🌑', power:50, element:'dark' },
+    light:   { name:'光弹',   icon:'☀', power:50, element:'light' },
+    wind:    { name:'风刃',   icon:'🌀', power:50, element:'wind' },
+    earth:   { name:'落石',   icon:'🪨', power:50, element:'earth' },
+    metal:   { name:'铁壁',   icon:'⚙️', power:50, element:'metal' },
+  };
+  return map[gene] || null;
+}
+
+function getPetSkills(pet) {
+  const gene = (pet.genes && pet.genes.length > 0) ? pet.genes[0] : null;
+  const ele = getElementSkillForGene(gene);
+  return [
+    { key:'tackle', name:'撞击', icon:'💥', power:30, type:'attack', desc:'基础攻击' },
+    ele ? { key:gene+'Skill', name:ele.name, icon:ele.icon, power:ele.power, type:'attack', element:ele.element, desc:gene+'系技能' }
+      : { key:'slash', name:'利爪', icon:'🪓', power:40, type:'attack', desc:'物理攻击' },
+    { key:'heal', name:'治愈', icon:'💚', power:0, type:'heal', desc:'回复30%HP' },
+  ];
+}
+
+function getTypeMultiplier(attackElement, defendElement) {
+  const chart = {
+    fire:    { grass:2, water:0.5, fire:1, ice:2, dark:1, light:1 },
+    water:   { fire:2, grass:0.5, water:1, earth:2, electric:0.5 },
+    grass:   { water:2, fire:0.5, grass:1, poison:0.5, fire:0.5 },
+    electric:{ water:2, earth:0, grass:0.5, electric:1, metal:2 },
+    ice:     { grass:2, water:0.5, ice:1, fire:0.5, earth:0.5 },
+    dark:    { light:2, dark:0.5, dark:1, ghost:2, neutral:1 },
+    light:   { dark:2, light:0.5, light:1, ghost:0.5, neutral:1 },
+    wind:    { fire:0.5, grass:2, earth:0, wind:1, bird:2 },
+    earth:   { fire:2, water:0.5, grass:0.5, electric:2, earth:1, metal:0.5 },
+    metal:   { earth:2, fire:0.5, metal:1, ice:2, electric:2 },
+  };
+  if (attackElement && defendElement) {
+    const row = chart[attackElement];
+    if (row && row[defendElement] !== undefined) return row[defendElement];
+  }
+  return 1;
+}
+
+function calcDamage(skill, attacker, defender) {
+  const basePower = skill.power || 30;
+  const levelBonus = 1 + attacker.level * 0.2;
+  const starBonus = 1 + (attacker.star - 1) * 0.3;
+  const base = Math.round(basePower * levelBonus * starBonus);
+
+  // 元素倍率（defender基因取第一个作为防御属性）
+  const defenderGene = (defender.genes && defender.genes.length > 0) ? defender.genes[0] : null;
+  const multiplier = getTypeMultiplier(skill.element, defenderGene);
+
+  // 随机波动 ±10%
+  const variance = 0.9 + Math.random() * 0.2;
+  return Math.max(1, Math.round(base * multiplier * variance));
+}
+
+function countAlive(pets) {
+  return pets.filter(p => p.hp > 0).length;
+}
+
+function getHpColor(ratio) {
+  if (ratio > 0.6) return '#4CAF50';
+  if (ratio > 0.3) return '#FFC107';
+  return '#E53935';
+}
+
+// ─── 道具/工具系统 ───
+
+function showToolSelect() {
+  initAudio();
+  closeOverlay();
+  const tools = g.inventory.tools || {};
+  let html = '<div style="font-size:14px;margin-bottom:10px">选择要使用的道具（长按目标宠物使用）：</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:500px;margin-bottom:12px;" id="toolSelectGrid">';
+
+  Object.entries(TOOLS).forEach(([key, t]) => {
+    const count = tools[key] || 0;
+    const disabled = count <= 0;
+    const borderColor = disabled ? '#333' : '#555';
+    html += `<button data-tool="${key}" style="background:#222;border:2px solid ${borderColor};color:${disabled?'#555':'#fff'};padding:8px 4px;font-family:monospace;font-size:11px;min-width:70px;display:flex;flex-direction:column;align-items:center;gap:2px;border-radius:6px;${disabled?'opacity:0.4;cursor:not-allowed':'cursor:pointer'}">
+      <span style="font-size:20px">${t.icon}</span>
+      <span style="font-size:11px">${t.name}</span>
+      <span style="color:#aaa;font-size:10px">×${count}</span>
+    </button>`;
+  });
+
+  html += '</div>';
+  html += '<div style="font-size:11px;color:#888;max-width:500px;text-align:left;line-height:1.7;margin-bottom:8px;">';
+  html += '<b>💧💨❄️🔥🔦🛏️</b> 基因道具 → 贴紧对应基因宠物使用，长按0.5秒触发<br>';
+  html += '<b>🦴🎵🪥</b> 通用道具 → 对任何宠物长按0.5秒触发<br>';
+  html += '<b>所有道具5次性</b>，用完可去商店购买<br>';
+  html += '</div>';
+  html += '<button onclick="closeOverlay()" style="background:#444;border:2px solid #666;color:#fff;padding:8px 20px;font-family:monospace;font-size:13px;cursor:pointer">关闭</button>';
+
+  document.getElementById('overlayMsg').innerHTML = html;
+  document.getElementById('overlay').classList.add('show');
+
+  // 事件委托：道具选择按钮点击
+  const tgrid = document.getElementById('toolSelectGrid');
+  if (tgrid) {
+    tgrid.onclick = null;
+    tgrid.onclick = (e) => {
+      const btn = e.target.closest('button[data-tool]');
+      if (!btn) return;
+      const key = btn.dataset.tool;
+      const count = (g.inventory.tools || {})[key] || 0;
+      if (count <= 0) { showToast('这个道具用完了！'); return; }
+      enterToolMode(key);
+    };
+  }
+}
+window.showToolSelect = showToolSelect;
+
+function enterToolMode(toolKey) {
+  const count = (g.inventory.tools || {})[toolKey] || 0;
+  if (count <= 0) { showToast('这个道具用完了！'); return; }
+  closeOverlay();
+  g.toolMode = { toolKey, uses: count, maxUses: 5 };
+  document.getElementById('toolAimHint').textContent = `${TOOLS[toolKey].icon} 将${TOOLS[toolKey].name}贴紧宠物，长按使用`;
+  document.getElementById('toolAimHint').style.display = 'block';
+  document.getElementById('toolCancelBtn').style.display = 'block';
+  showToast(`已选择 ${TOOLS[toolKey].icon} ${TOOLS[toolKey].name}，剩余 ${count} 次`, 3);
+  saveGame();
+}
+
+function exitToolMode() {
+  cancelToolMode();
+}
+
+function applyToolToPet(pet) {
+  if (!g.toolMode) return;
+  const { toolKey } = g.toolMode;
+  const t = TOOLS[toolKey];
+  const petPos = pet.scenePos || { x: 360, y: 300 };
+  const hasGene = pet.genes && pet.genes.includes(t.gene);
+
+  // 消耗1次
+  g.toolMode.uses--;
+  g.inventory.tools[toolKey] = g.toolMode.uses;
+
+  if (t.gene === null) {
+    // 通用道具
+    if (toolKey === 'bone') {
+      g.intimacy = Math.min(100, g.intimacy + 5);
+      showToast(`${pet.name}很开心！🦴 亲密+5`);
+    } else if (toolKey === 'musicBox') {
+      pet.petMood = 'happy';
+      pet.moodBubble = { show: true, timer: 3, text: '好开心~♪' };
+      pet.clickReaction = { type: 'spin', time: 0 };
+      showToast(`${pet.name}心情愉悦！🎵`);
+    } else if (toolKey === 'brush') {
+      g.intimacy = Math.min(100, g.intimacy + 3);
+      pet.petMood = 'happy';
+      pet.moodBubble = { show: true, timer: 2, text: '舒服~' };
+      showToast(`${pet.name}很舒服！🪥 亲密+3`);
+    }
+    spawnToolParticles(petPos, 'love');
+    playSound('pet');
+  } else if (hasGene) {
+    addExp(pet, 8);
+    pet.petMood = 'happy';
+    const goodTexts = {
+      waterBucket: '好凉快！💧', torch: '好暖和~🔥', flashlight: '好舒服~🔦',
+      icePack: '好清爽！❄️', fan: '好凉快~💨', soil: '好舒服~🪨', gem: '闪闪发光！💎',
+      blanket: '好温暖~🛏️',
+    };
+    pet.moodBubble = { show: true, timer: 3, text: goodTexts[toolKey] || '很舒服！' };
+    pet.clickReaction = { type: 'jump', time: 0 };
+    if (toolKey === 'blanket') {
+      g.intimacy = Math.min(100, g.intimacy + 5);
+      showToast(`${pet.name}很享受！${t.icon} +8经验 +5亲密`);
+    } else {
+      showToast(`${pet.name}很享受！${t.icon} +8经验`);
+    }
+    spawnToolParticles(petPos, 'love');
+    playSound('levelUp');
+  } else if (toolKey === 'flashlight') {
+    // 手电筒只对光系有效
+    pet.moodBubble = { show: true, timer: 2, text: '不适合...' };
+    showToast(`${pet.name}不是光系宠物，手电筒没有效果`);
+    spawnToolParticles(petPos, 'neutral');
+  } else if (toolKey === 'blanket') {
+    // 毯子只对暗系有效
+    pet.moodBubble = { show: true, timer: 2, text: '不适合...' };
+    showToast(`${pet.name}不是暗系宠物，毯子没有效果`);
+    spawnToolParticles(petPos, 'neutral');
+  } else {
+    addExp(pet, 1);
+    pet.moodBubble = { show: true, timer: 1.5, text: '还好吧' };
+    showToast(`${pet.name}没什么特别反应`);
+    spawnToolParticles(petPos, 'neutral');
+  }
+
+  // 检查是否用完
+  if (g.toolMode.uses <= 0) {
+    cancelToolMode();
+    showToast(`${t.icon} ${t.name} 已用完！`);
+  } else {
+    document.getElementById('toolAimHint').textContent = `${t.icon} 剩余 ${g.toolMode.uses} 次`;
+  }
+
+  updateBtnUI();
+  saveGame();
+}
+
+function spawnToolParticles(pos, type) {
+  const colors = type === 'love'
+    ? ['#FF69B4','#FF1493','#FF6EB4','#FFD700']
+    : ['#CCCCCC','#AAAAAA','#888888'];
+  const count = type === 'love' ? 12 : 6;
+  for (let i = 0; i < count; i++) {
+    toolParticles.push({
+      x: pos.x + (Math.random() - 0.5) * 60,
+      y: pos.y - 20 + (Math.random() - 0.5) * 40,
+      vx: (Math.random() - 0.5) * 3,
+      vy: -Math.random() * 3 - 1,
+      life: 1,
+      size: 4 + Math.random() * 5,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+  }
+}
+
+function updateToolParticles(dt) {
+  toolParticles = toolParticles.filter(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.05;
+    p.life -= dt * 1.5;
+    return p.life > 0;
+  });
+}
+
+function cancelToolMode() {
+  g.toolMode = null;
+  g.toolHold = null;
+  document.getElementById('toolAimHint').style.display = 'none';
+  document.getElementById('toolCancelBtn').style.display = 'none';
+  canvas.style.cursor = 'default';
+  showToast('已取消道具模式');
+}
+
+// ─── 商店系统 ───
+
+function openShop() {
+  initAudio();
+  const tools = g.inventory.tools || {};
+  const pet = g.currentPet || (g.pets.length > 0 ? g.pets[0] : null);
+  // 计算玩家资源：取当前展示宠物主人的亲密+经验作为货币
+  const intimacy = g.intimacy || 0;
+  const petExp = pet ? (pet.exp || 0) : 0;
+  const currency = intimacy + petExp;
+
+  let html = '<div style="font-size:15px;margin-bottom:12px;text-align:center">🛒 道具商店</div>';
+  html += `<div style="text-align:center;font-size:12px;color:#aaa;margin-bottom:14px">💰 资产：<b style="color:#FFD700">${currency}</b>（亲密+经验）</div>`;
+  html += '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:500px;margin-bottom:14px;" id="shopGrid">';
+
+  Object.entries(TOOLS).forEach(([key, t]) => {
+    const price = 50 + (t.gene ? 20 : 0); // 基因道具更贵
+    const canBuy = currency >= price;
+    const borderColor = canBuy ? '#4CAF50' : '#333';
+    html += `<button data-tool="${key}" data-price="${price}" style="background:#1a2a1a;border:2px solid ${borderColor};color:${canBuy?'#fff':'#555'};padding:8px 4px;font-family:monospace;font-size:11px;min-width:70px;display:flex;flex-direction:column;align-items:center;gap:2px;border-radius:6px;${canBuy?'':'opacity:0.5;cursor:not-allowed'}">
+      <span style="font-size:20px">${t.icon}</span>
+      <span style="font-size:11px">${t.name}</span>
+      <span style="color:#FFD700;font-size:10px">💰${price}</span>
+      <span style="color:#aaa;font-size:10px">库存×${tools[key]||0}</span>
+    </button>`;
+  });
+
+  html += '</div>';
+  html += '<div style="font-size:11px;color:#888;line-height:1.7;text-align:left;max-width:500px;">';
+  html += '💡 购买消耗<b style="color:#FFD700">亲密+经验</b>之和，每件道具5次使用次数<br>';
+  html += '💡 相克组合无效时仍消耗次数，建议对准基因使用<br>';
+  html += '</div>';
+  html += '<button onclick="closeOverlay()" style="margin-top:10px;background:#444;border:2px solid #666;color:#fff;padding:8px 24px;font-family:monospace;font-size:13px;cursor:pointer">关闭</button>';
+
+  document.getElementById('overlayMsg').innerHTML = html;
+  document.getElementById('overlay').classList.add('show');
+
+  // 事件委托：商店按钮点击
+  const grid = document.getElementById('shopGrid');
+  if (grid) {
+    grid.onclick = null;
+    grid.onclick = (e) => {
+      const btn = e.target.closest('button[data-tool]');
+      if (!btn) return;
+      buyTool(btn.dataset.tool, parseInt(btn.dataset.price, 10));
+    };
+  }
+}
+
+function buyTool(toolKey, price) {
+  const pet = g.currentPet || (g.pets.length > 0 ? g.pets[0] : null);
+  const intimacy = g.intimacy || 0;
+  const petExp = pet ? (pet.exp || 0) : 0;
+  const currency = intimacy + petExp;
+  if (currency < price) { showToast('资产不足！'); return; }
+  // 扣除资产（优先扣经验，再扣亲密）
+  let remain = price;
+  if (petExp >= remain) {
+    if (pet) pet.exp = Math.max(0, pet.exp - remain);
+  } else {
+    if (pet) pet.exp = 0;
+    remain -= petExp;
+    g.intimacy = Math.max(0, g.intimacy - remain);
+  }
+  // 增加道具
+  if (!g.inventory.tools) g.inventory.tools = {};
+  g.inventory.tools[toolKey] = (g.inventory.tools[toolKey] || 0) + 1;
+  showToast(`购买成功！${TOOLS[toolKey].icon} ${TOOLS[toolKey].name} ×1`);
+  playSound('levelUp');
+  updateBtnUI();
+  saveGame();
+  openShop(); // 刷新商店
+}
+
+// ─── 喂食系统 ───
+
+function showFeedSelect() {
+  initAudio();
+  if (g.feedCdLeft > 0) {
+    showToast(`喂食冷却 ${Math.ceil(g.feedCdLeft)}秒`);
+    return;
+  }
+  const w = g.inventory.worm, f = g.inventory.fruit, t = g.inventory.treat;
+  if (w + f + t === 0) {
+    showToast('没有食物了！');
+    return;
+  }
+
+  // 构建选择界面
+  let html = '<div style="font-size:14px;margin-bottom:12px">选择要喂的食物：</div>';
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">';
+
+  // 零食选项
+  if (t > 0) {
+    html += `<button onclick="doFeedItem('treat')" style="background:#222;border:3px solid #555;color:#fff;padding:10px 14px;font-family:monospace;font-size:13px;cursor:pointer;min-width:85px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      🦴 神秘饲料<br><span style="color:#aaa;font-size:11px">剩余 ${t} 个</span><br><span style="color:#4CAF50;font-size:10px">饥饿+40 亲密+15</span>
+    </button>`;
+  }
+  // 水果选项
+  if (f > 0) {
+    html += `<button onclick="doFeedItem('fruit')" style="background:#222;border:3px solid #555;color:#fff;padding:10px 14px;font-family:monospace;font-size:13px;cursor:pointer;min-width:85px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      🍎 水果<br><span style="color:#aaa;font-size:11px">剩余 ${f} 个</span><br><span style="color:#4CAF50;font-size:10px">饥饿+25 亲密+8</span>
+    </button>`;
+  }
+  // 虫子选项
+  if (w > 0) {
+    html += `<button onclick="doFeedItem('worm')" style="background:#222;border:3px solid #555;color:#fff;padding:10px 14px;font-family:monospace;font-size:13px;cursor:pointer;min-width:85px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      🐛 虫子<br><span style="color:#aaa;font-size:11px">剩余 ${w} 个</span><br><span style="color:#4CAF50;font-size:10px">饥饿+15 亲密+4</span>
+    </button>`;
+  }
+
+  html += '</div>';
+  html += '<button onclick="closeOverlay()" style="margin-top:16px;background:#333;border:3px solid #666;color:#fff;padding:10px 24px;font-family:monospace;font-size:14px;cursor:pointer">取消</button>';
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = html;
+  overlay.classList.add('show');
+}
+
+function doFeedItem(type) {
+  // type: 'treat', 'fruit', 'worm'
+  if (g.feedCdLeft > 0) {
+    showToast(`喂食冷却 ${Math.ceil(g.feedCdLeft)}秒`);
+    return;
+  }
+
+  if (type === 'treat') {
+    if (g.inventory.treat <= 0) {
+      showToast('没有神秘饲料了！');
+      return;
+    }
+    g.inventory.treat--;
+    g.hunger = Math.min(100, g.hunger + 40);
+    g.intimacy = Math.min(100, g.intimacy + 15);
+    g.hatchPct = Math.min(100, g.hatchPct + 5);
+    playSound('feedTreat');
+    showToast('神秘饲料！饥饿+40 亲密度+15');
+  } else if (type === 'fruit') {
+    if (g.inventory.fruit <= 0) {
+      showToast('没有水果了！');
+      return;
+    }
+    g.inventory.fruit--;
+    g.hunger = Math.min(100, g.hunger + 25);
+    g.intimacy = Math.min(100, g.intimacy + 8);
+    g.hatchPct = Math.min(100, g.hatchPct + 2);
+    playSound('feedFruit');
+    showToast('水果！饥饿+25 亲密度+8');
+  } else if (type === 'worm') {
+    if (g.inventory.worm <= 0) {
+      showToast('没有虫子了！');
+      return;
+    }
+    g.inventory.worm--;
+    g.hunger = Math.min(100, g.hunger + 15);
+    g.intimacy = Math.min(100, g.intimacy + 4);
+    playSound('feedWorm');
+    showToast('虫子！饥饿+15 亲密度+4');
+  }
+
+  if (g.currentPet) addExp(g.currentPet, 8);
+  g.feedCdLeft = FEED_COOLDOWN;
+  updateBtnUI();
+  saveGame();
+}
+
+// ─── 互动/其他 ───
+
+function exitInteractMode() {
+  if (g.interactGame === 'volleyball') {
+    volleyGame = null;
+    g.interactGame = null;
+    selectedInteractPets = [];
+  } else if (g.interactGame === 'ball') {
+    ballGame = null;
+    g.interactGame = null;
+    selectedInteractPets = [];
+  }
+  document.getElementById('exitInteractBtn').style.display = 'none';
+  showToast('已退出互动模式');
+}
+
+function cancelInteract() {
+  selectedInteractPets = [];
+  g.selectedInteractPet = null;
+  g.interactGame = null;
+  closeOverlay();
+  setTimeout(() => showInteractSelect(), 50);
+}
+
+function triggerPetInteraction(petA, petB) {
+  const types = ['play', 'nuzzle', 'dance'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  const duration = 1.5 + Math.random();
+
+  petA.interactAnim = { type, time: duration };
+  petB.interactAnim = { type, time: duration };
+  petA.interactPartner = petB.id;
+  petB.interactPartner = petA.id;
+  petA.interactCooldown = 8 + Math.random() * 7;
+  petB.interactCooldown = 8 + Math.random() * 7;
+
+  const mx = (petA.scenePos.x + petB.scenePos.x) / 2;
+  const my = (petA.scenePos.y + petB.scenePos.y) / 2;
+  for (let i = 0; i < 5; i++) {
+    g.heartParticles.push({
+      x: mx + (Math.random() - 0.5) * 30,
+      y: my - 10 - Math.random() * 20,
+      vx: (Math.random() - 0.5) * 1.5,
+      vy: -2 - Math.random() * 2,
+      life: 1.5 + Math.random(),
+    });
+  }
+
+  const bubbles = ['一起玩!', '蹭蹭~', '♪♪♪'];
+  petA.moodBubble = { show: true, timer: 2, text: bubbles[Math.floor(Math.random() * bubbles.length)] };
+  petB.moodBubble = { show: true, timer: 2, text: '♡' };
+  petA.petMood = 'happy';
+  petB.petMood = 'happy';
+  petA._moodResetTimer = 3;
+  petB._moodResetTimer = 3;
+}
+
+function triggerRandomEvent() {
+  initAudio();
+  playSound('event');
+  const dayEvents = [
+    { text: '晴空万里！孵化+5%', effect: () => { g.hatchPct = Math.min(100, g.hatchPct + 5); } },
+    { text: '小虫靠近！获得虫子×1', effect: () => { g.inventory.worm = Math.min(INV_MAX, g.inventory.worm + 1); } },
+    { text: '发现野果！获得水果×1', effect: () => { g.inventory.fruit = Math.min(INV_MAX, g.inventory.fruit + 1); } },
+    { text: '热浪来袭！温度+3°C', effect: () => { g.temp = Math.min(TEMP_MAX, g.temp + 3); } },
+    { text: '蚊虫骚扰！亲密度-5', effect: () => { g.intimacy = Math.max(0, g.intimacy - 5); } },
+  ];
+  const nightEvents = [
+    { text: '月色温柔...亲密度+10', effect: () => { g.intimacy = Math.min(100, g.intimacy + 10); } },
+    { text: '流星划过！孵化+8%', effect: () => { g.hatchPct = Math.min(100, g.hatchPct + 8); } },
+    { text: '找到零食！获得饲料×1', effect: () => { g.inventory.treat = Math.min(INV_MAX, g.inventory.treat + 1); } },
+    { text: '寒流来袭！温度-5°C', effect: () => { g.temp = Math.max(TEMP_MIN, g.temp - 5); } },
+    { text: '做了噩梦...亲密度-5', effect: () => { g.intimacy = Math.max(0, g.intimacy - 5); } },
+  ];
+
+  const pool = g.isDay ? dayEvents : nightEvents;
+  const ev = pool[Math.floor(Math.random() * pool.length)];
+  g.eventMsg = ev.text;
+  g.eventTimer = 5;
+  ev.effect();
+  g.eventCooldown = g.isDay ? 120 : 90;
+
+  // Show event in DOM
+  const el = document.getElementById('evt');
+  el.textContent = ev.text;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function updateInteractBtn() {
+  const btn = document.getElementById('exitInteractBtn');
+  if (!btn) return;
+  if (g.interactGame === 'volleyball' || g.interactGame === 'ball') {
+    btn.style.display = 'block';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function getGeneDesc(gk) {
+  const descs = {
+    fire: '孵化加速',
+    water: '成长加速',
+    grass: '抗寒增强',
+    electric: '充电加速',
+    ice: '抗热增强',
+    dark: '夜间加成',
+    light: '白天加成',
+    wind: '移动加速',
+    earth: '防御增强',
+    metal: '寿命延长',
+  };
+  return descs[gk] || '未知';
+}
+
+function releasePet(idx) {
+  const pet = g.pets[idx];
+  if (!pet) return;
+  showToast(`${pet.name} 回到了大自然...`);
+  g.pets.splice(idx, 1);
+  if (g.currentPet === pet) {
+    g.currentPet = g.pets.length > 0 ? g.pets[g.pets.length - 1] : null;
+  }
+  closeOverlay();
+  saveGame();
+}
