@@ -2796,7 +2796,7 @@ window.showBattleSelect = function showBattleSelect() {
 }
 
 window.toggleBattlePet = function(petId, silent) {
-  const pet = g.pets.find(p => p.id === petId);
+  const pet = g.pets.find(p => p.id == petId);
   if (!pet || pet.restUntil > Date.now()) return;
 
   const current = battlePetTeam[petId];
