@@ -1443,7 +1443,7 @@ window.spawnPet = function() {
   const nameList = ['小球', '毛球', '豆豆', '噗噗', '咪咪', '爪爪', '果冻', '棉花', '糖糖', '泡泡'];
   const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
   const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
-  const name = nameList[Math.floor(Math.random() * nameList.length)];
+  const name = nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
   const star = Math.random() < 0.7 ? 1 : (Math.random() < 0.7 ? 2 : 3);
   const pet = {
     id: 'pet_' + Date.now(),
@@ -1456,9 +1456,12 @@ window.spawnPet = function() {
     eggDays: 0,
     state: 'idle',
     sprite: '🐾',
-    x: 280 + Math.random() * 160,
-    y: 310 + Math.random() * 80,
-    facing: 1,
+    scenePos: { x: 280 + Math.random() * 160, y: 310 + Math.random() * 80 },
+    facingRight: true,
+    clickReaction: null, petMood: 'normal',
+    moodBubble: { show: false, timer: 0 },
+    wanderTarget: null, wanderTimer: 2+Math.random()*3,
+    wanderSpeed: 0.3+Math.random()*0.5, wanderIdle: 0,
     trait: traits[Math.floor(Math.random() * traits.length)],
     hunger: 80,
     intimacy: 50,
@@ -1468,9 +1471,7 @@ window.spawnPet = function() {
     happy: 80,
     lastSleep: Date.now(),
     lastFeed: Date.now(),
-    hp: star * 25,
-    maxHp: star * 25,
-    restUntil: 0,
+    hp: star * 25, maxHp: star * 25, restUntil: 0,
   };
   g.pets.push(pet);
   saveGame();
