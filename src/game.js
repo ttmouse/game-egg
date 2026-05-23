@@ -365,11 +365,12 @@ function doSynthesize() {
   const listHtml = g.pets.map((p, i) => {
     const starStr = '★'.repeat(p.star || 1) + '☆'.repeat(5 - (p.star || 1));
     const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('') || '无';
+    const petTypeIdx = getPetType(p);
     return `<div class="breed-pet-item" id="breed_item_${i}" onclick="toggleSynthSelect(${i})" style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #333;cursor:pointer">
       <canvas id="breed_canvas_${i}" width="48" height="48" style="image-rendering:pixelated"></canvas>
       <div>
-        <div style="color:${STAR_COLORS[p.star]}">${p.name} ${starStr}</div>
-        <div style="color:#aaa;font-size:11px">F${p.generation} · ${geneStr} · Lv.${p.level}</div>
+        <div style="color:${STAR_COLORS[p.star]}">${PET_EMOJI[petTypeIdx]||'🐾'} ${p.name} ${starStr}</div>
+        <div style="color:#aaa;font-size:11px">${PET_TYPE_NAMES[petTypeIdx]||''} · F${p.generation} · ${geneStr} · Lv.${p.level}</div>
       </div>
       <div id="breed_check_${i}" style="margin-left:auto;color:#444;font-size:20px">○</div>
     </div>`;
@@ -552,10 +553,11 @@ function showPetDetail(idx) {
   const expProg = Math.floor(((pet.exp - expCur) / (expNext - expCur)) * 100);
   const daysLeft = pet.expireDay - g.dayCount;
 
+  const detailPetTypeIdx = getPetType(pet);
   msg.innerHTML = `<div class="title">${starStr}</div>
     <canvas id="${canvasId}" width="96" height="96" style="image-rendering:pixelated;margin:6px auto;display:block"></canvas>
-    <div style="color:${STAR_COLORS[pet.star]};font-size:20px">${pet.name}</div>
-    <div style="color:#aaa;font-size:12px">${geneStr} · F${pet.generation}</div>
+    <div style="color:${STAR_COLORS[pet.star]};font-size:20px">${PET_EMOJI[detailPetTypeIdx]||'🐾'} ${pet.name}</div>
+    <div style="color:#aaa;font-size:12px">${PET_TYPE_NAMES[detailPetTypeIdx]||''} · ${geneStr} · F${pet.generation}</div>
     <div style="color:#aaa;font-size:12px"><span style="color:${STAR_COLORS[pet.star]}">Lv.${pet.level}</span></div>
     <div style="margin-top:4px;font-size:11px;color:#666">经验 <span style="color:#aaa">${pet.exp}</span> / ${expNext}</div>
     <div style="background:#333;height:6px;border-radius:3px;margin:4px 0"><div style="background:#90EE90;height:6px;border-radius:3px;width:${expProg}%"></div></div>
