@@ -508,7 +508,7 @@ function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
     petMood: 'normal', moodBubble: { show: false, timer: 0 },
     wanderTarget: null, wanderTimer: 2 + Math.random() * 3,
     wanderSpeed: 0.3 + Math.random() * 0.5, facingRight: true,
-    hp: (star + 1) * 25, maxHp: (star + 1) * 25, restUntil: 0,
+    hp: newStar * 25, maxHp: newStar * 25, restUntil: 0,
   };
   recordDiscovery(child);
   g.pets.push(child);
@@ -528,15 +528,23 @@ function showAlbum() {
   const msg = document.getElementById('overlayMsg');
   g.pets.forEach(p => recordDiscovery(p));
 
+  // 统计各类型数量
+  const typeCounts = {};
+  g.pets.forEach(p => {
+    const t = getPetType(p);
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+  });
+
   let typeHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;justify-content:center">';
   for (let i = 0; i < 8; i++) {
     const discovered = g.discoveredTypes.includes(i);
     const name = PET_TYPE_NAMES[i];
     const emoji = PET_EMOJI[i];
+    const count = typeCounts[i] || 0;
     if (discovered) {
       typeHtml += `<div style="flex:0 0 calc(50% - 6px);max-width:160px;background:#1a1a2e;border:2px solid #555;border-radius:8px;padding:6px;text-align:center;display:flex;align-items:center;gap:8px">
         <span style="font-size:28px">${emoji}</span>
-        <div style="text-align:left"><div style="color:#FFD700;font-size:12px">${name}</div><div style="color:#4CAF50;font-size:10px">✓ 已发现</div></div></div>`;
+        <div style="text-align:left"><div style="color:#FFD700;font-size:12px">${name}</div><div style="color:#4CAF50;font-size:10px">${count}只 ✓</div></div></div>`;
     } else {
       typeHtml += `<div style="flex:0 0 calc(50% - 6px);max-width:160px;background:#111;border:2px solid #333;border-radius:8px;padding:6px;text-align:center;opacity:0.5;display:flex;align-items:center;gap:8px">
         <span style="font-size:28px;color:#555">❓</span>
