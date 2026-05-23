@@ -1441,12 +1441,19 @@ function setupInput(canvasEl) {
 // 在浏览器控制台运行 spawnPet() 即可新增一只随机宠物
 // 可选参数: spawnPet(0~7) 指定类型 (0猫 1狗 2兔子 3狐狸 4鼠 5龙 6鸟 7熊)
 window.spawnPet = function(typeIdx) {
-  const nameList = ['小球', '毛球', '豆豆', '噗噗', '咪咪', '爪爪', '果冻', '棉花', '糖糖', '泡泡'];
+  const namePool = ['小球','毛球','豆豆','噗噗','咪咪','爪爪','果冻','棉花','糖糖','泡泡',
+    '小云','小雪','小星','小月','小花','小果','小糖','小乖','小团','小圆',
+    '大毛','大胖','大耳','大尾','绒球','豆花','糖豆','奶糖','奶茶',
+    '云朵','星星','月亮','雪球','冰糕','可乐','布丁','麻薯','年糕',
+    '小毛球','大耳朵','圆滚滚','胖嘟嘟','毛茸茸','软绵绵','甜丝丝',
+    '小豆子','小团子','小汤圆','小布丁','花卷','包子','饺子','汤圆',
+    '糯米','豆沙','咕噜','噜噜','哈哈','嘻嘻','呼噜',
+    '嗡嗡','叮咚','嘎嘎','啾啾','咕咕','咪呜'];
   const petTypeNames = ['猫', '狗', '兔子', '狐狸', '鼠', '龙', '鸟', '熊'];
   const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
   const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
   // 如果指定了类型，反复生成名字直到哈希匹配
-  const genName = () => nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
+  const genName = () => namePool[Math.floor(Math.random() * namePool.length)];
   let name = genName();
   if (typeIdx !== undefined) {
     let h = 0;
