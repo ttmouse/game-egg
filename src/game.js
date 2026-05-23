@@ -243,13 +243,6 @@ function drawHUD() {
   drawText(`${Math.floor(g.power)}`, 400, Y1 + 16, pColor, 1);
 
   drawText(`第${g.dayCount}天  ·  🐾${g.pets.length}只`, 8, Y2, P.dim, 1);
-  drawText('亲密', 100, Y2, P.dim, 1);
-  const hearts = g.currentPet ? Math.floor(g.intimacy / 20) : 0;
-  ctx.fillStyle = P.heart;
-  for (let i = 0; i < hearts; i++) {
-    ctx.fillRect(100 + i * 18, Y2 + 16, 10, 10);
-    ctx.fillRect(98 + i * 18, Y2 + 18, 14, 8);
-  }
 
   if (g.currentPet) {
     const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
