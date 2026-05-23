@@ -318,6 +318,7 @@ function showToast(msg, duration = 2) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.style.display = 'none'; }, duration * 1000);
 }
+window.showToast = showToast; // 暴露到全局，供 HTML onclick 使用
 
 // ─── 合成系统 ───
 let synthSelect = [];
@@ -357,6 +358,7 @@ function doSynthesize() {
     <div id="breed_error" style="color:#f55;font-size:12px;margin-top:6px;display:none">请选择3只同星级的宠物</div>
     <div style="display:flex;gap:8px;margin-top:10px">
       <button onclick="confirmSynth()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">合成</button>
+      <button onclick="autoSynth()" style="flex:1;padding:8px;background:#2a1a1a;border:2px solid #f55;color:#f88;cursor:pointer">自动合成</button>
       <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">取消</button>
     </div>`;
   overlay.classList.add('show');
@@ -404,6 +406,40 @@ window.confirmSynth = function() {
   finalizeSynth(petA, idxA, petB, idxB, petC, idxC);
 };
 
+// 自动合成：从最低星开始，自动批处理所有可合成组合
+window.autoSynth = function() {
+  let totalCount = 0;
+  while (true) {
+    // 按星级分组
+    const groups = {};
+    g.pets.forEach((p, i) => {
+      if (!groups[p.star]) groups[p.star] = [];
+      groups[p.star].push(i);
+    });
+
+    // 找最低星且 ≥3 只且 <5 星的组合（每组做完后重新分组，因为数组索引会变）
+    const sortedStars = Object.keys(groups).map(Number).sort((a, b) => a - b);
+    let found = false;
+    for (const star of sortedStars) {
+      if (star >= 5) continue;
+      if (groups[star].length >= 3) {
+        const idxs = groups[star].slice(0, 3);
+        finalizeSynth(g.pets[idxs[0]], idxs[0], g.pets[idxs[1]], idxs[1], g.pets[idxs[2]], idxs[2]);
+        totalCount++;
+        found = true;
+        break;
+      }
+    }
+    if (!found) break;
+  }
+  closeOverlay();
+  if (totalCount > 0) {
+    showToast(`✅ 自动合成完成，共合成 ${totalCount} 次`);
+  } else {
+    showToast('没有可合成的组合（需要至少3只同星级宠物）');
+  }
+};
+
 function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
   initAudio();
   const newStar = petA.star + 1;
@@ -416,7 +452,7 @@ function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
     if (allGeneKeys.length > 0) childGenes.push(allGeneKeys[Math.floor(Math.random() * allGeneKeys.length)]);
   }
   const childGen = Math.max(petA.generation, petB.generation, petC.generation) + 1;
-  const childName = petA.name + '·进化';
+  const childName = petA.name;
   const allTraits = [...petA.traits, ...petB.traits, ...petC.traits];
   const childTraits = [...new Set(allTraits)].slice(0, 2);
 
@@ -1216,7 +1252,7 @@ window.spawnPet = function() {
   const nameList = ['小球', '毛球', '豆豆', '噗噗', '咪咪', '爪爪', '果冻', '棉花', '糖糖', '泡泡'];
   const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
   const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
-  const name = nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
+  const name = nameList[Math.floor(Math.random() * nameList.length)];
   const pet = {
     id: 'pet_' + Date.now(),
     name,
@@ -1364,11 +1400,435 @@ function showGameSelect() {
 window.startBallGame = function() { showToast('⚽ 扔球游戏开发中'); closeOverlay(); };
 window.startVolleyballGame = function() { showToast('🏐 排球游戏开发中'); closeOverlay(); };
 
+// ─── 宠物叫声 ────────────────────────────────────────────────────
+const PET_SOUNDS = ['dog', 'cat', 'rabbit', 'fox', 'mouse', 'dragon', 'bird', 'bear'];
+const PET_SOUND_NAMES = { dog:'汪汪！', cat:'喵~', rabbit:'尖叫！', fox:'尖啸！', mouse:'吱吱！', dragon:'低吼！', bird:'啾啾！', bear:'吼！' };
+
+function playPetSound(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const now = ctx.currentTime;
+    if (type === 'dog') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.1);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now); osc.stop(now + 0.3);
+    } else if (type === 'cat') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
+      osc.frequency.exponentialRampToValueAtTime(500, now + 0.25);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now); osc.stop(now + 0.3);
+    } else if (type === 'rabbit') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(900, now);
+      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.05);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+      osc.start(now); osc.stop(now + 0.25);
+    } else if (type === 'fox') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.15);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      osc.start(now); osc.stop(now + 0.35);
+    } else if (type === 'mouse') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now); osc.stop(now + 0.15);
+    } else if (type === 'dragon') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(100, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now); osc.stop(now + 0.4);
+    } else if (type === 'bird') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1000, now);
+      osc.frequency.exponentialRampToValueAtTime(1400, now + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.15);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc.start(now); osc.stop(now + 0.2);
+    } else if (type === 'bear') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now); osc.stop(now + 0.4);
+    }
+    setTimeout(() => ctx.close(), 500);
+  } catch(e) {}
+}
+
+// ─── 文字/语音指令解析 ────────────────────────────────────────────
+function executeVoiceCommand(text) {
+  const t = text.trim();
+  if (!t) return;
+
+  // 叫名字反应：喊 "[名字]" → 该宠物叫
+  const nameMatch = t.match(/^(.+?)[\s,，.。!！?？]?$/);
+  if (nameMatch) {
+    const calledName = nameMatch[1].trim();
+    if (['所有宠物排队', '所有宠物'].includes(calledName)) {
+      // 排队指令，下面处理
+    } else {
+      const pet = g.pets.find(p => p.name === calledName);
+      if (pet) {
+        const typeIdx = getPetType(pet);
+        const soundType = PET_SOUNDS[typeIdx];
+        playPetSound(soundType);
+        showToast(pet.name + '：' + (PET_SOUND_NAMES[soundType] || '叫了一声'));
+        pet.petMood = 'happy';
+        pet.moodBubble = { show: true, timer: 2.5, text: PET_SOUND_NAMES[soundType] || '叫了' };
+        pet.clickReaction = { type: 'bounce', time: 0 };
+        return;
+      }
+    }
+  }
+
+  // "[名字]，过来" → 宠物跑到中间
+  const comeMatch = t.match(/^(.+?)[,，]\s*过来$/);
+  if (comeMatch) {
+    const petName = comeMatch[1].trim();
+    const pet = g.pets.find(p => p.name === petName);
+    if (pet) {
+      if (!pet.scenePos) pet.scenePos = { x: 360, y: 300 };
+      pet.scenePos.x = 360;
+      pet.scenePos.y = 300;
+      pet.petMood = 'happy';
+      pet.moodBubble = { show: true, timer: 2, text: '来啦！' };
+      pet.clickReaction = { type: 'bounce', time: 0 };
+      showToast(pet.name + '跑过来了！');
+      playPetSound(PET_SOUNDS[getPetType(pet)]);
+      return;
+    } else {
+      showToast('没找到叫「' + petName + '」的宠物');
+      return;
+    }
+  }
+
+  // ─── 队形指令 ───────────────────────────────────────────────────
+  const setPetsPositions = (positions, holdSeconds = 8) => {
+    g.pets.forEach((pet, i) => {
+      if (!pet.scenePos) pet.scenePos = { x: 360, y: 300 };
+      if (positions[i]) {
+        pet.scenePos.x = positions[i].x;
+        pet.scenePos.y = positions[i].y;
+      }
+      pet.wanderTarget = null;
+      pet.wanderTimer = holdSeconds + Math.random() * 3;
+      pet.wanderIdle = 0;
+      pet.petMood = 'happy';
+      pet.moodBubble = { show: true, timer: holdSeconds, text: '到！' };
+    });
+  };
+
+  // 一排（横排）
+  if (t.includes('一排') || t.includes('横排') || t.includes('排成一排') || t.includes('站好') || t.includes('立正')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const spacing = Math.min(80, 700 / count);
+    const startX = 360 - (count - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({ x: startX + i * spacing, y: 300 }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成一排！');
+    return;
+  }
+
+  // 两排
+  if (t.includes('两排') || t.includes('两行') || t.includes('排成两排') || t.includes('排成两行')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const half = Math.ceil(count / 2);
+    const spacing = Math.min(80, 500 / half);
+    const startX = 360 - (half - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({
+      x: startX + (i % half) * spacing,
+      y: i < half ? 240 : 360
+    }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成两排！');
+    return;
+  }
+
+  // 三排
+  if (t.includes('三排') || t.includes('三行') || t.includes('排成三排') || t.includes('排成三行')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const cols = Math.ceil(count / 3);
+    const spacingX = Math.min(80, 600 / cols);
+    const spacingY = 70;
+    const startX = 360 - (cols - 1) * spacingX / 2;
+    const positions = g.pets.map((_, i) => ({
+      x: startX + (i % cols) * spacingX,
+      y: 200 + Math.floor(i / cols) * spacingY
+    }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成三排！');
+    return;
+  }
+
+  // 圆圈 / 围圈
+  if (t.includes('圆圈') || t.includes('围成圈') || t.includes('围圈') || t.includes('站成一圈') || t.includes('围成圆')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const radius = Math.min(160, 80 * count);
+    const cx = 360, cy = 300;
+    const positions = g.pets.map((_, i) => {
+      const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+      return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
+    });
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物围成一圈！');
+    return;
+  }
+
+  // 方阵
+  if (t.includes('方阵') || t.includes('方队') || t.includes('排成方阵')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const cols = Math.ceil(Math.sqrt(count));
+    const spacing = 75;
+    const startX = 360 - (cols - 1) * spacing / 2;
+    const startY = 300 - (cols - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({
+      x: startX + (i % cols) * spacing,
+      y: startY + Math.floor(i / cols) * spacing
+    }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成方阵！');
+    return;
+  }
+
+  // 散开 / 分散
+  if (t.includes('散开') || t.includes('分散') || t.includes('自由活动')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const positions = g.pets.map(() => ({
+      x: 100 + Math.random() * 520,
+      y: 150 + Math.random() * 250
+    }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + g.pets.length + '只宠物散开自由活动！');
+    return;
+  }
+
+  // 报数
+  if (t.includes('报数')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const spacing = 80;
+    const startX = 360 - (count - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({ x: startX + i * spacing, y: 300 }));
+    setPetsPositions(positions, 15);
+    g.pets.forEach((pet, i) => {
+      setTimeout(() => {
+        pet.petMood = 'happy';
+        pet.moodBubble = { show: true, timer: 3, text: '第' + (i + 1) + '！' };
+        pet.clickReaction = { type: 'bounce', time: 0 };
+        playPetSound(PET_SOUNDS[getPetType(pet)]);
+        showToast(pet.name + '：第' + (i + 1) + '！', 2);
+      }, i * 800);
+    });
+    showToast('🐾 ' + count + '只宠物报数！');
+    return;
+  }
+
+  // 集中 / 聚拢 / 集合
+  if (t.includes('集中') || t.includes('聚拢') || t.includes('集合') || t.includes('过来集合')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const positions = g.pets.map((_, i) => {
+      const angle = (i / g.pets.length) * Math.PI * 2;
+      return { x: 360 + Math.cos(angle) * 60, y: 300 + Math.sin(angle) * 40 };
+    });
+    setPetsPositions(positions);
+    showToast('🐾 ' + g.pets.length + '只宠物集合！');
+    return;
+  }
+
+  // 排队（默认一排）
+  if (t === '排队' || t === '排队列' || t.includes('排队')) {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const spacing = Math.min(60, 600 / count);
+    const startX = 360 - (count - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({ x: startX + i * spacing, y: 300 }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成一排！');
+    return;
+  }
+
+  // 所有宠物（默认一排）
+  if (t.includes('所有宠物') || t.includes('全部宠物') || t === '来') {
+    if (g.pets.length === 0) { showToast('还没有宠物！'); return; }
+    const count = g.pets.length;
+    const spacing = Math.min(60, 600 / count);
+    const startX = 360 - (count - 1) * spacing / 2;
+    const positions = g.pets.map((_, i) => ({ x: startX + i * spacing, y: 300 }));
+    setPetsPositions(positions);
+    showToast('🐾 ' + count + '只宠物排成一排！');
+    return;
+  }
+
+  showToast('听不懂：「' + t + '」');
+}
+
+// ─── 文字指令输入 ─────────────────────────────────────────────────
+window.executeTextCommand = function() {
+  const input = document.getElementById('voiceTextInput');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  executeVoiceCommand(text);
+};
+
+// ─── 本地语音识别 ─────────────────────────────────────────────────
+let voiceActive = false;
+let mediaRecorder = null;
+let audioChunks = [];
+
+window.startVoiceCommand = async function() {
+  if (voiceActive) {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+    }
+    voiceActive = false;
+    document.getElementById('voiceStatus').textContent = '可用';
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(track => track.stop());
+  } catch (e) {
+    if (e.name === 'NotAllowedError') {
+      showToast('🎤 麦克风权限被拒绝，请在浏览器设置中允许');
+    } else {
+      showToast('🎤 无法访问麦克风');
+    }
+    return;
+  }
+
+  voiceActive = true;
+  audioChunks = [];
+  document.getElementById('voiceStatus').textContent = '聆听中...';
+  showToast('🎤 请说话（喊名字、名字+过来、所有宠物排队）', 4);
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : 'audio/webm';
+
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(track => track.stop());
+
+      if (audioChunks.length === 0) {
+        voiceActive = false;
+        document.getElementById('voiceStatus').textContent = '可用';
+        return;
+      }
+
+      document.getElementById('voiceStatus').textContent = '识别中...';
+
+      const audioBlob = new Blob(audioChunks, { type: mimeType });
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64 = reader.result.split(',')[1];
+
+        try {
+          const response = await fetch('http://127.0.0.1:8765/api/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio: base64, language: 'zh' }),
+          });
+
+          if (!response.ok) {
+            throw new Error('API错误: ' + response.status);
+          }
+
+          const result = await response.json();
+          const text = result.text || '';
+
+          if (text) {
+            showToast('你说：「' + text + '」', 3);
+            executeVoiceCommand(text);
+          } else {
+            showToast('🎤 没听清楚，请再说一次');
+          }
+        } catch (e) {
+          console.error('语音识别失败:', e);
+          if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+            showToast('🎤 本地识别服务未启动，请运行: python voice_server.py', 5);
+          } else {
+            showToast('🎤 识别失败: ' + e.message);
+          }
+        }
+
+        voiceActive = false;
+        document.getElementById('voiceStatus').textContent = '可用';
+      };
+      reader.readAsDataURL(audioBlob);
+    };
+
+    mediaRecorder.onerror = (e) => {
+      console.error('MediaRecorder错误:', e);
+      stream.getTracks().forEach(track => track.stop());
+      voiceActive = false;
+      document.getElementById('voiceStatus').textContent = '可用';
+      showToast('🎤 录音出错');
+    };
+
+    mediaRecorder.start();
+    setTimeout(() => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }, 10000);
+
+  } catch (e) {
+    console.error('录音错误:', e);
+    voiceActive = false;
+    document.getElementById('voiceStatus').textContent = '可用';
+    if (e.name === 'NotAllowedError') {
+      showToast('🎤 麦克风权限被拒绝');
+    } else {
+      showToast('🎤 录音失败: ' + e.message);
+    }
+  }
+};
+
 // Other stubs
 window.showFeedSelect = function() { showToast('🍖 喂食功能开发中'); };
 window.exitInteractMode = function() { showToast('已退出互动模式'); };
-window.startVoiceCommand = function() { showToast('🎤 语音功能需要运行 voice_server.py'); };
-window.executeTextCommand = function() { showToast('📝 文字指令功能开发中'); };
 window.showToolSelect = function() { showToast('🧰 道具功能开发中'); };
 window.cancelToolMode = function() { showToast('已取消'); };
 window.openShop = function() { showToast('🛒 商店功能开发中'); };
