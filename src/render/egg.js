@@ -94,7 +94,9 @@ export function drawEgg() {
     return;
   }
 
-  const crack = Math.floor(g.hatchPct / 20);
+  const stage = Math.floor(g.hatchPct / 20);
+
+  // Draw egg body
   for (let py = -eggH / 2; py < eggH / 2; py++) {
     const prog = py / (eggH / 2);
     let w = py < 0
@@ -109,27 +111,58 @@ export function drawEgg() {
     ctx.fillRect(ex - w, ey + py, w * 2, 1);
   }
 
-  if (crack >= 1) {
+  // 花纹（蛋壳斑点）
+  ctx.fillStyle = 'rgba(180, 140, 80, 0.35)';
+  const spots = [[-15, -25], [10, -15], [-5, 5], [18, -5], [-20, 10], [12, 20]];
+  spots.forEach(([dx, dy]) => {
+    const spotW = 5 + Math.abs(dx) % 3;
+    ctx.fillRect(ex + dx - spotW / 2, ey + dy - spotW / 2, spotW, spotW);
+  });
+
+  // 高光（顶部白色反光）
+  ctx.fillStyle = 'rgba(255, 255, 240, 0.6)';
+  ctx.fillRect(ex - 12, ey - eggH / 2 + 12, 6, 10);
+
+  // 底部阴影
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+  ctx.fillRect(ex - eggW / 2 + 5, ey + eggH / 2 - 6, eggW - 10, 4);
+
+  // 裂纹阶段 1
+  if (stage >= 1) {
     ctx.fillStyle = P.eggCrack;
-    ctx.fillRect(ex - 6, ey - 20, 4, 12); ctx.fillRect(ex + 2, ey - 16, 3, 8);
-    ctx.fillRect(ex - 8, ey + 5, 5, 10);
-    ctx.fillStyle = P.eggShd;
-    ctx.fillRect(ex + 1, ey - 18, 2, 6); ctx.fillRect(ex - 6, ey + 8, 3, 4);
+    ctx.fillRect(ex - 8, ey - 18, 6, 8);
+    ctx.fillRect(ex + 2, ey - 12, 8, 6);
   }
-  if (crack >= 2) {
-    ctx.fillStyle = P.eggCrack;
-    ctx.fillRect(ex + 8, ey - 10, 4, 8); ctx.fillRect(ex - 12, ey - 5, 5, 6);
-    ctx.fillRect(ex + 5, ey + 15, 3, 7);
+  // 裂纹阶段 2
+  if (stage >= 2) {
+    ctx.fillRect(ex - 18, ey, 10, 6);
+    ctx.fillRect(ex + 8, ey + 6, 8, 8);
+    ctx.fillRect(ex - 6, ey + 14, 6, 6);
   }
-  if (crack >= 3) {
-    ctx.fillStyle = P.eggCrack;
-    ctx.fillRect(ex - 4, ey + 25, 8, 5); ctx.fillRect(ex + 12, ey + 8, 4, 5);
-    ctx.fillRect(ex - 18, ey + 12, 4, 4);
+  // 裂纹阶段 3
+  if (stage >= 3) {
+    ctx.fillRect(ex - 24, ey - 6, 8, 6);
+    ctx.fillRect(ex + 14, ey - 10, 6, 12);
+    ctx.fillRect(ex - 12, ey + 20, 12, 6);
+    ctx.fillRect(ex + 2, ey - 24, 8, 6);
   }
-  if (crack >= 4) {
+  // 裂纹阶段 4 - 蛋壳裂开，显示内部
+  if (stage >= 4) {
+    ctx.fillStyle = P.eggInt;
+    ctx.fillRect(ex - 14, ey - 10, 28, 32);
     ctx.fillStyle = P.eggCrack;
-    ctx.fillRect(ex - 8, ey + 30, 16, 4); ctx.fillRect(ex + 6, ey + 20, 5, 8);
-    ctx.fillRect(ex - 4, ey - 24, 8, 4);
+    for (let i = 0; i < 6; i++) {
+      const cx = ex - 24 + Math.floor(Math.random() * 48);
+      const cy = ey - 24 + Math.floor(Math.random() * 54);
+      ctx.fillRect(cx, cy, 6, 6);
+    }
+    ctx.fillStyle = '#D4A574';
+    ctx.fillRect(ex - 8, ey - 6, 16, 24);
+    // 眼睛探出
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ex - 3, ey, 6, 6);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(ex, ey, 2, 2);
   }
 
   drawText(`孵化 ${Math.floor(g.hatchPct)}%`, ex - 50, ey + eggH / 2 + 8, P.dim, 1.5);
@@ -147,11 +180,43 @@ export function drawEggToCtx(targetCtx) {
     drawTextToCtx(targetCtx, ex - 64, ey + eggH / 2 + 30, `等待第${g.nextHatchDay}天`, P.dim, 2);
     return;
   }
+  const stage = Math.floor(g.hatchPct / 20);
   for (let py = -eggH / 2; py < eggH / 2; py++) {
     const prog = py / (eggH / 2);
     let w = py < 0 ? Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85)) : Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
     targetCtx.fillStyle = '#f5e6c8';
     targetCtx.fillRect(ex - w, ey + py, w * 2, 1);
+  }
+  // 花纹
+  targetCtx.fillStyle = 'rgba(180, 140, 80, 0.35)';
+  const spots = [[-15, -25], [10, -15], [-5, 5], [18, -5], [-20, 10], [12, 20]];
+  spots.forEach(([dx, dy]) => {
+    const spotW = 5 + Math.abs(dx) % 3;
+    targetCtx.fillRect(ex + dx - spotW / 2, ey + dy - spotW / 2, spotW, spotW);
+  });
+  // 高光
+  targetCtx.fillStyle = 'rgba(255, 255, 240, 0.6)';
+  targetCtx.fillRect(ex - 12, ey - eggH / 2 + 12, 6, 10);
+  // 裂纹
+  if (stage >= 1) {
+    targetCtx.fillStyle = P.eggCrack;
+    targetCtx.fillRect(ex - 8, ey - 18, 6, 8);
+    targetCtx.fillRect(ex + 2, ey - 12, 8, 6);
+  }
+  if (stage >= 2) {
+    targetCtx.fillRect(ex - 18, ey, 10, 6);
+    targetCtx.fillRect(ex + 8, ey + 6, 8, 8);
+    targetCtx.fillRect(ex - 6, ey + 14, 6, 6);
+  }
+  if (stage >= 3) {
+    targetCtx.fillRect(ex - 24, ey - 6, 8, 6);
+    targetCtx.fillRect(ex + 14, ey - 10, 6, 12);
+    targetCtx.fillRect(ex - 12, ey + 20, 12, 6);
+    targetCtx.fillRect(ex + 2, ey - 24, 8, 6);
+  }
+  if (stage >= 4) {
+    targetCtx.fillStyle = P.eggInt;
+    targetCtx.fillRect(ex - 14, ey - 10, 28, 32);
   }
   targetCtx.fillStyle = P.barBg;
   targetCtx.fillRect(ex - 40, ey + eggH / 2 + 8, 80, 6);
@@ -161,6 +226,31 @@ export function drawEggToCtx(targetCtx) {
   if (g.nextHatchDay > 0) {
     const daysLeft = g.nextHatchDay - g.dayCount;
     if (daysLeft > 0) drawTextToCtx(targetCtx, ex - 75, ey + eggH / 2 + 40, `还剩${daysLeft}天`, P.warn, 2);
+  }
+}
+
+export function drawHatchingAnimToCtx(targetCtx) {
+  const t = Date.now() / 200;
+  const cx = 360, cy = 300;
+  targetCtx.fillStyle = P.eggLight;
+  for (let i = 0; i < 6; i++) {
+    const px = cx - 60 + i * 24 + Math.sin(t + i) * 12;
+    const py = cy - 40 + (i % 3) * 20 + Math.floor(t + i) % 20;
+    targetCtx.fillRect(Math.floor(px), Math.floor(py), 16, 16);
+  }
+  const glow = (Math.sin(t * 2) + 1) * 0.5;
+  targetCtx.fillStyle = `rgba(255, 200, 100, ${glow * 0.8})`;
+  targetCtx.fillRect(cx - 40, cy - 40, 80, 80);
+  if (g.hatchAnim > 10) {
+    const peek = Math.min(1, (g.hatchAnim - 10) / 20);
+    targetCtx.fillStyle = '#FFE4B5';
+    targetCtx.fillRect(cx - 30 * peek, cy - 30 * peek, 60 * peek, 60 * peek);
+    targetCtx.fillStyle = '#000';
+    targetCtx.fillRect(cx - 18, cy - 10, 10, 10);
+    targetCtx.fillRect(cx + 8, cy - 10, 10, 10);
+    targetCtx.fillStyle = '#fff';
+    targetCtx.fillRect(cx - 16, cy - 8, 4, 4);
+    targetCtx.fillRect(cx + 10, cy - 8, 4, 4);
   }
 }
 

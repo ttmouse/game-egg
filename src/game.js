@@ -10,8 +10,8 @@ import {
 } from './config.js';
 import { initAudio, playSound, soundSynth } from './audio.js';
 import { drawText, drawTextToCtx } from './utils.js';
-import { drawIsoGround, isoToScreen, screenToIso } from './render/ground.js';
-import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim } from './render/egg.js';
+import { drawIsoGround, isoToScreen, screenToIso, drawSunMoonToCtx } from './render/ground.js';
+import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim, drawHatchingAnimToCtx } from './render/egg.js';
 import { drawPetSprite } from './render/pet_sprite.js';
 
 // ─── 游戏状态变量（从原始版恢复） ───
@@ -1000,9 +1000,11 @@ function loop() {
 
     // Render old scene
     drawIsoGroundToCtx(transOldCtx);
+    drawSunMoonToCtx(transOldCtx);
     if (g.sceneTransition.from === 'incubator') {
       drawIncubatorToCtx(transOldCtx);
-      drawEggToCtx(transOldCtx);
+      if (g.isHatching) drawHatchingAnimToCtx(transOldCtx);
+      else drawEggToCtx(transOldCtx);
     } else {
       const sortedPets = [...g.pets].sort((a, b) => (a.isoCol||0)+(a.isoRow||0) - ((b.isoCol||0)+(b.isoRow||0)));
       sortedPets.forEach(pet => {
@@ -1013,9 +1015,11 @@ function loop() {
 
     // Render new scene
     drawIsoGroundToCtx(transNewCtx);
+    drawSunMoonToCtx(transNewCtx);
     if (g.sceneTransition.to === 'incubator') {
       drawIncubatorToCtx(transNewCtx);
-      drawEggToCtx(transNewCtx);
+      if (g.isHatching) drawHatchingAnimToCtx(transNewCtx);
+      else drawEggToCtx(transNewCtx);
     } else {
       const sortedPets = [...g.pets].sort((a, b) => (a.isoCol||0)+(a.isoRow||0) - ((b.isoCol||0)+(b.isoRow||0)));
       sortedPets.forEach(pet => {
@@ -1440,12 +1444,13 @@ window.spawnPet = function() {
   const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
   const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
   const name = nameList[Math.floor(Math.random() * nameList.length)];
+  const star = Math.random() < 0.7 ? 1 : (Math.random() < 0.7 ? 2 : 3);
   const pet = {
     id: 'pet_' + Date.now(),
     name,
     type: 'normal',
     genes: [randomGene(), randomGene(), randomGene()],
-    star: Math.random() < 0.7 ? 1 : (Math.random() < 0.7 ? 2 : 3),
+    star,
     level: 1,
     exp: 0,
     eggDays: 0,
@@ -1463,8 +1468,8 @@ window.spawnPet = function() {
     happy: 80,
     lastSleep: Date.now(),
     lastFeed: Date.now(),
-    hp: pet.star * 25,
-    maxHp: pet.star * 25,
+    hp: star * 25,
+    maxHp: star * 25,
     restUntil: 0,
   };
   g.pets.push(pet);
