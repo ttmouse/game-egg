@@ -1120,6 +1120,8 @@ export function init(c, c2d) {
       if (p.traits === undefined) p.traits = ['普通'];
       if (p.hp === undefined || p.maxHp === undefined) { p.maxHp = p.star * 25; p.hp = p.maxHp; }
       if (p.restUntil === undefined) p.restUntil = 0;
+      // 清理旧名数字后缀：如 "小球42" → "小球"
+      if (typeof p.name === 'string') p.name = p.name.replace(/[\d]+$/g, '').replace(/·进化$/, '');
     });
 
     // 修复 currentPet 引用（JSON 反序列化后是副本，不是 pets 数组中的引用）
