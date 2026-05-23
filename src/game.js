@@ -242,7 +242,7 @@ function drawHUD() {
   const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
   drawText(`${Math.floor(g.power)}`, 400, Y1 + 16, pColor, 1);
 
-  drawText(`第${g.dayCount}天`, 8, Y2, P.dim, 1);
+  drawText(`第${g.dayCount}天  ·  🐾${g.pets.length}只`, 8, Y2, P.dim, 1);
   drawText('亲密', 100, Y2, P.dim, 1);
   const hearts = g.currentPet ? Math.floor(g.intimacy / 20) : 0;
   ctx.fillStyle = P.heart;
