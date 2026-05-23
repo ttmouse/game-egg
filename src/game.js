@@ -209,58 +209,69 @@ function drawDroppedFood() {
 }
 
 // ─── HUD ───
+// 画图标的专用函数（更大字号 + Emoji 友好字体）
+function drawIcn(text, x, y, color, scale = 1.3) {
+  if (text == null) return;
+  const fontSize = Math.max(12, Math.floor(18 * scale));
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${fontSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Microsoft YaHei",sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.fillText(text, Math.floor(x), Math.floor(y));
+  ctx.restore();
+}
+
 function drawHUD() {
   ctx.fillStyle = 'rgba(0,0,0,0.8)';
   ctx.fillRect(0, 0, canvas.width, 80);
-  const Y1 = 8, Y2 = 38;
+  const Y1 = 6, Y2 = 40;
 
   // ── 第一行：时间 · 孵化 · 温度 · 电量 · 宠物 ──
-  // 时间图标
   const timeIcon = g.isDay ? '☀' : '🌙';
   const rem = g.isDay ? DAY_SEC - g.time : NGT_SEC - (g.time - DAY_SEC);
-  drawText(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, 8, Y1, P.txt, 1);
+  drawIcn(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, 6, Y1, P.txt, 1.1);
 
   // 孵化进度
-  drawText('🥚', 104, Y1, P.txt, 1);
+  drawIcn('🥚', 112, Y1, '#aaa', 1.2);
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(122, Y1 + 4, 80, 8);
+  ctx.fillRect(134, Y1 + 4, 76, 10);
   const hatchColor = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
   ctx.fillStyle = hatchColor;
-  ctx.fillRect(122, Y1 + 4, Math.floor(80 * g.hatchPct / 100), 8);
-  drawText(`${Math.floor(g.hatchPct)}%`, 206, Y1, hatchColor, 1);
+  ctx.fillRect(134, Y1 + 4, Math.floor(76 * g.hatchPct / 100), 10);
+  drawIcn(`${Math.floor(g.hatchPct)}%`, 214, Y1, hatchColor, 1.1);
 
   // 温度
   const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
   const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
-  drawText(`🌡${g.temp.toFixed(0)}°`, 254, Y1, tempColor, 1);
+  drawIcn(`🌡${g.temp.toFixed(0)}°`, 270, Y1, tempColor, 1.2);
 
   // 电量
   const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
-  drawText(`⚡${Math.floor(g.power)}`, 340, Y1, pColor, 1);
+  drawIcn(`⚡${Math.floor(g.power)}`, 360, Y1, pColor, 1.2);
 
   // 宠物总数
-  drawText(`🐾${g.pets.length}`, 420, Y1, P.dim, 1);
+  drawIcn(`🐾${g.pets.length}`, 450, Y1, '#aaa', 1.2);
 
   // ── 第二行：天数 · 饥饿 · 加热状态 ──
-  drawText(`📅${g.dayCount}天`, 8, Y2, P.dim, 1);
+  drawIcn(`📅${g.dayCount}天`, 6, Y2, '#aaa', 1.1);
 
   if (g.currentPet) {
     const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
-    drawText('🍖', 76, Y2, P.dim, 1);
+    drawIcn('🍖', 86, Y2, '#aaa', 1.2);
     ctx.fillStyle = P.barBg;
-    ctx.fillRect(96, Y2 + 4, 80, 8);
+    ctx.fillRect(110, Y2 + 4, 76, 10);
     ctx.fillStyle = hungerColor;
-    ctx.fillRect(96, Y2 + 4, Math.floor(80 * g.hunger / 100), 8);
-    drawText(`${Math.floor(g.hunger)}`, 180, Y2, hungerColor, 1);
+    ctx.fillRect(110, Y2 + 4, Math.floor(76 * g.hunger / 100), 10);
+    drawIcn(`${Math.floor(g.hunger)}`, 190, Y2, hungerColor, 1.1);
   }
 
-  // 加热/冰袋状态
+  // 加热/冰袋状态（右上角）
   let heatIcon = '', heatClr = P.dim;
-  if (g.heatOn && g.power > 0) { heatIcon = '🔥加热'; heatClr = P.danger; }
-  else if (g.heatOn) { heatIcon = '🔥无电'; heatClr = P.dim; }
-  else if (g.iceOn) { heatIcon = '🧊冰敷'; heatClr = '#00BFFF'; }
+  if (g.heatOn && g.power > 0) { heatIcon = '🔥加'; heatClr = '#FF4500'; }
+  else if (g.heatOn) { heatIcon = '🔥零电'; heatClr = P.dim; }
+  else if (g.iceOn) { heatIcon = '🧊冰'; heatClr = '#00BFFF'; }
   else { heatIcon = '❄关'; heatClr = P.dim; }
-  drawText(heatIcon, 620, Y1, heatClr, 1);
+  drawIcn(heatIcon, 640, Y1, heatClr, 1.2);
 }
 
 function drawFeedInventory() {
