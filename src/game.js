@@ -1,4 +1,4 @@
-import { g, saveGame, loadRawSave, initTransCanvases, transOldCtx, transNewCtx, transOldCanvas, transNewCanvas } from './state.js';
+import { g, saveGame, loadRawSave, initTransCanvases, transOldCtx, transNewCtx, transOldCanvas, transNewCanvas, petSpriteCache } from './state.js';
 import { ctx, canvas, initCanvas } from './canvas.js';
 import {
   DAY_SEC, NGT_SEC, CYCLE, TEMP_MIN, TEMP_MAX, TEMP_OPT_MIN, TEMP_OPT_MAX,
@@ -23,8 +23,6 @@ let volleyGame = null
 let battlePetTeam = {}
 
 let battleState = null
-
-const petSpriteCache = new Map(); // petId -> { canvas, timestamp }
 
 let toolParticles = []; // 道具粒子效果
 
@@ -731,6 +729,20 @@ function update(dt) {
     g.power = Math.min(POWER_MAX, g.power + regen);
   }
 
+  // 随机事件
+  g.eventCooldown -= dt;
+  if (g.eventCooldown <= 0 && !g.eventMsg) {
+    triggerRandomEvent();
+  }
+  if (g.eventTimer > 0) {
+    g.eventTimer -= dt;
+    if (g.eventTimer <= 0) {
+      g.eventMsg = null;
+      const el = document.getElementById('evt');
+      if (el) el.classList.remove('show');
+    }
+  }
+
   if (g.currentPet && g.dayCount > g.currentPet.expireDay) {
     initAudio(); playSound('petLeave');
     const petName = g.currentPet.name;
@@ -797,6 +809,11 @@ function update(dt) {
 
   updatePetWander(dt);
   updatePetInteractions(dt);
+  updateInteractBtn();
+  updateToolParticles(dt);
+  if (g.interactGame === 'ball' && ballGame) updateBallGame(dt);
+  if (g.interactGame === 'volleyball' && volleyGame) updateVolleyball(dt);
+  if (g.interactGame === 'battle' && battleState) updateBattle(dt);
 }
 
 function startHatch() {
@@ -982,6 +999,12 @@ function loop() {
       });
     }
     ctx.drawImage(transNewCanvas, newOffset, 0);
+  } else if (g.interactGame === 'battle' && battleState) {
+    drawBattle(ctx);
+  } else if (g.interactGame === 'ball' && ballGame) {
+    drawBallGame(ctx);
+  } else if (g.interactGame === 'volleyball' && volleyGame) {
+    drawVolleyballGame(ctx);
   } else {
     // Normal rendering
     drawIsoGround();
@@ -3702,6 +3725,10 @@ function exitInteractMode() {
     ballGame = null;
     g.interactGame = null;
     selectedInteractPets = [];
+  } else if (g.interactGame === 'battle') {
+    battleState = null;
+    battlePetTeam = {};
+    g.interactGame = null;
   }
   document.getElementById('exitInteractBtn').style.display = 'none';
   showToast('已退出互动模式');
