@@ -1792,8 +1792,7 @@ function executeVoiceCommand(text) {
       pet.wanderTarget = null;
       pet.wanderTimer = holdSeconds + Math.random() * 3;
       pet.wanderIdle = 0;
-      pet.petMood = 'happy';
-      pet.moodBubble = { show: true, timer: holdSeconds, text: '到！' };
+      pet.petMood = 'normal';
     });
   };
 
