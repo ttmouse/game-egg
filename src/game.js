@@ -492,6 +492,7 @@ function finalizeSynth(petA, idxA, petB, idxB, petC, idxC) {
     petMood: 'normal', moodBubble: { show: false, timer: 0 },
     wanderTarget: null, wanderTimer: 2 + Math.random() * 3,
     wanderSpeed: 0.3 + Math.random() * 0.5, facingRight: true,
+    hp: (star + 1) * 25, maxHp: (star + 1) * 25, restUntil: 0,
   };
   recordDiscovery(child);
   g.pets.push(child);
@@ -849,6 +850,7 @@ function finalizeHatch() {
     petMood: 'normal', moodBubble: { show: false, timer: 0 },
     wanderTarget: null, wanderTimer: 2 + Math.random() * 3,
     wanderSpeed: 0.3 + Math.random() * 0.5, facingRight: true,
+    hp: star * 25, maxHp: star * 25, restUntil: 0,
   };
   recordDiscovery(newPet);
   g.pets.push(newPet);
@@ -950,6 +952,28 @@ function loop() {
   const dt = Math.min((now - g.lastTs) / 1000, 1);
   g.lastTs = now;
   update(dt);
+
+  // ─── 互动游戏更新 & 渲染 ───
+  if (g.interactGame === 'ball' && ballGame) {
+    updateBallGame(dt);
+    drawBallGame(ctx);
+    requestAnimationFrame(loop);
+    return;
+  }
+  if (g.interactGame === 'volleyball' && volleyGame) {
+    updateVolleyball(dt);
+    drawVolleyballGame(ctx);
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  // ─── 宠物战斗渲染 ───
+  if (battleState !== null) {
+    updateBattle(dt);
+    drawBattle(ctx);
+    requestAnimationFrame(loop);
+    return;
+  }
 
   // Transition
   if (g.sceneTransition.active) {
@@ -1088,6 +1112,8 @@ export function init(c, c2d) {
       if (p.facingRight === undefined) p.facingRight = true;
       if (p.genes === undefined) p.genes = [];
       if (p.traits === undefined) p.traits = ['普通'];
+      if (p.hp === undefined || p.maxHp === undefined) { p.maxHp = p.star * 25; p.hp = p.maxHp; }
+      if (p.restUntil === undefined) p.restUntil = 0;
     });
 
     // 修复 currentPet 引用（JSON 反序列化后是副本，不是 pets 数组中的引用）
@@ -1164,6 +1190,38 @@ function setupInput(canvasEl) {
       g.foodDropCd = 3;
       initAudio(); playSound('forage');
       saveGame();
+    }
+
+    // 战斗点击处理
+    if (g.interactGame === 'battle' && battleState) {
+      // 技能选择
+      if (battleState.animPhase === 'skillSelect' && battleState.skillBtns) {
+        for (const btn of battleState.skillBtns) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            doBattleSkill(btn.skillKey);
+            return;
+          }
+        }
+      }
+      // 目标选择
+      if (battleState.animPhase === 'targeting' && battleState.targetBtns) {
+        for (const btn of battleState.targetBtns) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            doBattleTarget(btn.petId);
+            return;
+          }
+        }
+      }
+      // 结果按钮
+      if (battleState.animPhase === 'result' && window._battleResultBtns) {
+        for (const btn of window._battleResultBtns) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            btn.onclick();
+            return;
+          }
+        }
+      }
+      return;
     }
   });
 
@@ -1404,7 +1462,10 @@ window.spawnPet = function() {
     sleepDebt: 0,
     happy: 80,
     lastSleep: Date.now(),
-    lastFeed: Date.now()
+    lastFeed: Date.now(),
+    hp: pet.star * 25,
+    maxHp: pet.star * 25,
+    restUntil: 0,
   };
   g.pets.push(pet);
   saveGame();
@@ -2676,8 +2737,10 @@ window.showBattleSelect = function showBattleSelect() {
   html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;max-height:300px;overflow-y:auto;margin-bottom:10px;" id="battlePetGrid">';
 
   g.pets.forEach(pet => {
+    if (!pet.maxHp) pet.maxHp = pet.star * 25;
+    if (pet.hp === undefined || pet.hp === null) pet.hp = pet.maxHp;
     const isResting = pet.restUntil > Date.now();
-    const hpRatio = pet.hp / pet.maxHp;
+    const hpRatio = Math.max(0, Math.min(1, pet.hp / pet.maxHp));
     const hpColor = getHpColor(hpRatio);
     const geneStr = (pet.genes||[]).map(gk=>(GENES[gk]||{}).icon||'').join('');
     const restLeft = isResting ? Math.max(0, Math.ceil((pet.restUntil - Date.now())/1000)) : 0;
@@ -2732,7 +2795,7 @@ window.showBattleSelect = function showBattleSelect() {
   updateBattleTeamUI();
 }
 
-function toggleBattlePet(petId, silent) {
+window.toggleBattlePet = function(petId, silent) {
   const pet = g.pets.find(p => p.id === petId);
   if (!pet || pet.restUntil > Date.now()) return;
 
@@ -2797,7 +2860,7 @@ window.cancelBattle = function() {
   setTimeout(() => showGameSelect(), 50);
 }
 
-function startBattle() {
+window.startBattle = function() {
   const teamA = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'A').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
   const teamB = Object.keys(battlePetTeam).filter(id => battlePetTeam[id] === 'B').map(id => g.pets.find(p => p.id == id)).filter(Boolean);
 
