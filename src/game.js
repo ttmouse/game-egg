@@ -2,7 +2,7 @@ import { g, saveGame, loadRawSave, initTransCanvases, transOldCtx, transNewCtx, 
 import { ctx, canvas, initCanvas } from './canvas.js';
 import {
   DAY_SEC, NGT_SEC, CYCLE, TEMP_MIN, TEMP_MAX, TEMP_OPT_MIN, TEMP_OPT_MAX,
-  POWER_MAX, HEAT_DRAIN, HATCH_RATE, HATCH_RATE_COLD, HATCH_RATE_HOT,
+  POWER_MAX, HEAT_DRAIN, POWER_DAY_REGEN, POWER_NGT_REGEN, HATCH_RATE, HATCH_RATE_COLD, HATCH_RATE_HOT,
   PET_COOLDOWN, FEED_COOLDOWN, FORAGE_COOLDOWN, INV_MAX, PET_MAX,
   ISO_COLS, ISO_ROWS, TILE_W, TILE_H, OX, OY, CONTENT_OFFSET,
   GENES, TOOLS, SKILLS, STAR_COLORS, EXP_TABLE, P,
@@ -12,7 +12,7 @@ import { initAudio, playSound, soundSynth } from './audio.js';
 import { drawText, drawTextToCtx } from './utils.js';
 import { drawIsoGround, isoToScreen, screenToIso } from './render/ground.js';
 import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim } from './render/egg.js';
-// Battle system - not yet extracted, stubs provided
+import { drawPetSprite } from './render/pet_sprite.js';
 
 // ═══════════════════════════════════════════════════════════════════
 // 渲染函数
@@ -31,75 +31,6 @@ function drawSunMoon() {
 }
 
 // ─── 绘制宠物 ───
-function drawPetSprite(canvas, pet, animTime) {
-  const c = canvas.getContext('2d');
-  c.imageSmoothingEnabled = false;
-  c.clearRect(0, 0, 48, 48);
-  const t = animTime || 0;
-  const breathe = Math.sin(t * 2.5) * 1.5;
-  const tailSwing = Math.sin(t * 3.5) * 2;
-  const cx = 24, cy = 26 + breathe;
-
-  const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h*31 + s.charCodeAt(i)) & 0xFFFF; return h; };
-  const h = hash(pet.name);
-  const petType = h % 8;
-  const hue = (h * 7) % 360;
-  let geneHue = hue, geneSat = 55, geneLit = 55;
-  const bodyColor = `hsl(${geneHue},${geneSat}%,55%)`;
-  const darkColor = `hsl(${geneHue},${geneSat}%,35%)`;
-  const lightColor = `hsl(${geneHue},${geneSat}%,75%)`;
-  const eyeColor = '#333';
-  const blinkCycle = t % 4;
-  const isBlinking = blinkCycle > 3.85;
-
-  // Body
-  for (let y = -10; y <= 10; y++) {
-    const w = Math.floor(10 * (1 - y * y / 110));
-    c.fillStyle = bodyColor;
-    c.fillRect(cx - w, cy + y, w * 2, 1);
-  }
-  c.fillStyle = lightColor;
-  c.fillRect(cx - 4, cy + 2, 8, 5);
-
-  // Feet
-  c.fillStyle = darkColor;
-  c.fillRect(cx - 8, cy + 10, 5, 4);
-  c.fillRect(cx + 3, cy + 10, 5, 4);
-
-  // Tail
-  c.fillStyle = bodyColor;
-  c.fillRect(cx + 10 + Math.round(tailSwing), cy + 2, 4, 6);
-  c.fillRect(cx + 12 + Math.round(tailSwing), cy - 2, 4, 6);
-
-  // Head
-  for (let y = -8; y <= 6; y++) {
-    const w = Math.floor(10 * (1 - y * y / 70));
-    c.fillStyle = bodyColor;
-    c.fillRect(cx - w, cy - 12 + y, w * 2, 1);
-  }
-  // Ears
-  c.fillStyle = bodyColor;
-  c.fillRect(cx - 8, cy - 18, 4, 6);
-  c.fillRect(cx + 4, cy - 18, 4, 6);
-  // Eyes
-  c.fillStyle = eyeColor;
-  if (isBlinking) {
-    c.fillRect(cx - 5, cy - 11, 4, 1);
-    c.fillRect(cx + 2, cy - 11, 4, 1);
-  } else {
-    c.fillRect(cx - 5, cy - 11, 3, 3);
-    c.fillRect(cx + 3, cy - 11, 3, 3);
-    c.fillStyle = '#fff';
-    c.fillRect(cx - 4, cy - 12, 1, 1);
-    c.fillRect(cx + 4, cy - 12, 1, 1);
-  }
-  // Nose/mouth
-  c.fillStyle = '#555';
-  c.fillRect(cx - 1, cy - 7, 3, 1);
-  c.fillRect(cx - 1, cy - 6, 1, 2);
-  c.fillRect(cx + 1, cy - 6, 1, 2);
-}
-
 function drawPet(pet, x, y, options = {}) {
   if (!pet) return;
   const basePx = x, basePy = y;
@@ -1276,6 +1207,45 @@ function setupInput(canvasEl) {
     }
   }, { passive: false });
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 控制台调试指令
+// ═══════════════════════════════════════════════════════════════════
+// 在浏览器控制台运行 spawnPet() 即可新增一只随机宠物
+window.spawnPet = function() {
+  const nameList = ['小球', '毛球', '豆豆', '噗噗', '咪咪', '爪爪', '果冻', '棉花', '糖糖', '泡泡'];
+  const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
+  const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
+  const name = nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
+  const pet = {
+    id: 'pet_' + Date.now(),
+    name,
+    type: 'normal',
+    genes: [randomGene(), randomGene(), randomGene()],
+    star: Math.random() < 0.7 ? 1 : (Math.random() < 0.7 ? 2 : 3),
+    level: 1,
+    exp: 0,
+    eggDays: 0,
+    state: 'idle',
+    sprite: '🐾',
+    x: 280 + Math.random() * 160,
+    y: 310 + Math.random() * 80,
+    facing: 1,
+    trait: traits[Math.floor(Math.random() * traits.length)],
+    hunger: 80,
+    intimacy: 50,
+    temp: 25,
+    health: 100,
+    sleepDebt: 0,
+    happy: 80,
+    lastSleep: Date.now(),
+    lastFeed: Date.now()
+  };
+  g.pets.push(pet);
+  saveGame();
+  console.log('✅ 新宠物 "' + name + '" 生成！基因:', pet.genes.join(''), '星星:', pet.star + '★', '总宠物数:', g.pets.length);
+  showToast('🥚 新宠物 "' + name + '"！');
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // 过渡场景渲染辅助
