@@ -45,6 +45,8 @@ body {
   width: min(1280px, 100vw);
   height: auto;
   aspect-ratio: 1280 / 800;
+  position: relative;
+  z-index: 1;
 }
 #btns {
   display: flex;
@@ -145,8 +147,8 @@ body {
 </head>
 <body>
 <!-- 场景切换固定图标 -->
-<button id="sceneNavLeft" class="sceneNavBtn" title="切换到孵蛋室">◀</button>
-<button id="sceneNavRight" class="sceneNavBtn" title="切换到宠物间">▶</button>
+<button id="sceneNavLeft" class="sceneNavBtn" title="切换场景" onclick="doSceneSwitch(g.currentScene==='pets'?'incubator':'pets')">◀</button>
+<button id="sceneNavRight" class="sceneNavBtn" title="切换场景" onclick="doSceneSwitch(g.currentScene==='pets'?'incubator':'pets')">▶</button>
 <div id="wrap">
   <canvas id="c"></canvas>
   <div id="btns">
@@ -557,6 +559,7 @@ ctx.imageSmoothingEnabled = false;
 
 // 游戏内容横向偏移量（把 720 内容居中到 1280 画布）
 const CONTENT_OFFSET = Math.round((canvas.width - 720) / 2); // 280px
+const CONTENT_WIDTH = 720; // 内容区宽度
 
 // 获取画布坐标（支持鼠标和触摸）
 function getCanvasCoords(e) {
@@ -590,6 +593,18 @@ function getTouchPoint(e, index = 0) {
     return { clientX: e.changedTouches[index].clientX, clientY: e.changedTouches[index].clientY };
   }
   return null;
+}
+
+// ─── 固定图标切换场景（全局函数） ───────────────────────
+function doSceneSwitch(toScene) {
+  try {
+    console.log('doSceneSwitch:', toScene, 'currentScene:', g.currentScene, 'pets:', g.pets.length);
+    if (g.sceneTransition.active) { console.log('blocked: transition active'); return; }
+    if (g.currentScene === toScene) { console.log('blocked: same scene'); return; }
+    if (toScene === 'pets' && g.pets.length === 0) { console.log('blocked: no pets'); return; }
+    g.sceneTransition = { active: true, progress: 0, from: g.currentScene, to: toScene };
+    console.log('transition started:', g.sceneTransition);
+  } catch(e) { console.error('doSceneSwitch error:', e); }
 }
 
 // 画布点击检测（宠物列表 + 场景切换 + 宠物点击）
@@ -696,55 +711,35 @@ canvas.addEventListener('click', (e) => {
     }
   }
 
-// ─── 固定图标切换场景 ───────────────────────────────
-function doSceneSwitch(toScene) {
-  try {
-    console.log('doSceneSwitch:', toScene, 'currentScene:', g.currentScene, 'pets:', g.pets.length);
-    if (g.sceneTransition.active) { console.log('blocked: transition active'); return; }
-    if (g.currentScene === toScene) { console.log('blocked: same scene'); return; }
-    if (toScene === 'pets' && g.pets.length === 0) { console.log('blocked: no pets'); return; }
-    g.sceneTransition = { active: true, progress: 0, from: g.currentScene, to: toScene };
-    console.log('transition started:', g.sceneTransition);
-  } catch(e) { console.error('doSceneSwitch error:', e); }
-}
-
 // 场景切换按钮通过 HTML onclick 属性绑定（见 body 按钮）
 
   // 场景切换按钮区域（左右两侧大箭头，内容居中后箭头在内容两侧）
   // 左箭头：x: 内容区左边缘, y: 200-380
   if (g.currentScene === 'pets' && mx >= CONTENT_OFFSET && mx <= CONTENT_OFFSET + 50 && my >= 200 && my <= 380) {
-    if (!g.sceneTransition.active) {
-      initAudio();
-      playSound('sceneSwitch');
-      g.sceneTransition = { active: true, progress: 0, from: 'pets', to: 'incubator' };
-    }
+    initAudio();
+    playSound('sceneSwitch');
+    doSceneSwitch('incubator');
     return;
   }
   // 右箭头：x: 内容区右边缘, y: 200-380
   if (g.currentScene === 'pets' && mx >= CONTENT_OFFSET + 670 && mx <= CONTENT_OFFSET + 720 && my >= 200 && my <= 380) {
-    if (!g.sceneTransition.active) {
-      initAudio();
-      playSound('sceneSwitch');
-      g.sceneTransition = { active: true, progress: 0, from: 'pets', to: 'incubator' };
-    }
+    initAudio();
+    playSound('sceneSwitch');
+    doSceneSwitch('incubator');
     return;
   }
   // 左箭头：x: 内容区左边缘, y: 200-380
   if (g.currentScene === 'incubator' && mx >= CONTENT_OFFSET && mx <= CONTENT_OFFSET + 50 && my >= 200 && my <= 380) {
-    if (!g.sceneTransition.active) {
-      initAudio();
-      playSound('sceneSwitch');
-      g.sceneTransition = { active: true, progress: 0, from: 'incubator', to: 'pets' };
-    }
+    initAudio();
+    playSound('sceneSwitch');
+    doSceneSwitch('pets');
     return;
   }
   // 右箭头：x: 内容区右边缘, y: 200-380（孵化间有宠物时）
   if (g.currentScene === 'incubator' && g.pets.length > 0 && mx >= CONTENT_OFFSET + 670 && mx <= CONTENT_OFFSET + 720 && my >= 200 && my <= 380) {
-    if (!g.sceneTransition.active) {
-      initAudio();
-      playSound('sceneSwitch');
-      g.sceneTransition = { active: true, progress: 0, from: 'incubator', to: 'pets' };
-    }
+    initAudio();
+    playSound('sceneSwitch');
+    doSceneSwitch('pets');
     return;
   }
 
@@ -753,8 +748,11 @@ function doSceneSwitch(toScene) {
     const types = ['worm', 'worm', 'worm', 'fruit', 'treat'];
     const foodType = types[Math.floor(Math.random() * types.length)];
     const targetY = Math.max(300, Math.min(500, my));
+    // 食物投放在内容区域内（CONTENT_OFFSET ~ CONTENT_OFFSET+720）
+    const minX = CONTENT_OFFSET + 40;
+    const maxX = CONTENT_OFFSET + 680;
     g.droppedFood.push({
-          x: Math.max(80, Math.min(640, mx)),
+          x: Math.max(minX, Math.min(maxX, mx)),
           y: targetY,
           type: foodType,
           timer: 60,
@@ -768,6 +766,21 @@ function doSceneSwitch(toScene) {
         saveGame();
     }
 });
+
+// ─── 全局文档级场景切换按钮点击捕获 ─────────────────────
+// 由于 position:fixed 按钮可能被 canvas 层遮挡，用文档级监听确保触发
+document.addEventListener('click', (e) => {
+  const target = e.target;
+  if (target && target.id === 'sceneNavLeft') {
+    e.preventDefault();
+    e.stopPropagation();
+    doSceneSwitch(g.currentScene === 'pets' ? 'incubator' : 'pets');
+  } else if (target && target.id === 'sceneNavRight') {
+    e.preventDefault();
+    e.stopPropagation();
+    doSceneSwitch(g.currentScene === 'pets' ? 'incubator' : 'pets');
+  }
+}, true); // capture phase
 
 // ─── 拖拽系统 ─────────────────────────────────────────────────────
 canvas.addEventListener('mousedown', (e) => {
@@ -6597,9 +6610,14 @@ function loop() {
     const ease = 1 - Math.pow(1 - p, 3); // ease-out cubic
     const toPets = g.sceneTransition.to === 'pets';
 
-    // 旧场景和新场景的偏移量
-    const oldOffset = Math.round((toPets ? ease : -ease) * canvas.width);
-    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * canvas.width);
+    // 填充地面色，避免滑动时露出黑色画布背景
+    const bgColor = g.isDay ? '#3d8b37' : '#1f4a1f';
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 旧场景和新场景的偏移量（使用内容区宽度 720，而非画布宽度 1280）
+    const oldOffset = Math.round((toPets ? ease : -ease) * CONTENT_WIDTH);
+    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * CONTENT_WIDTH);
 
     // ── 旧场景 ──
     initTransCanvases();
@@ -6785,16 +6803,6 @@ loop();
 // Auto-save every 30s
 setInterval(saveGame, 30000);
 
-// ─── 场景切换固定按钮 JS 事件绑定 ─────────────────────
-document.getElementById('sceneNavLeft').addEventListener('click', function(e) {
-  e.stopPropagation();
-  console.log('[NavLeft] clicked, currentScene:', g.currentScene);
-  doSceneSwitch('pets'); // 左按钮切到宠物间
-});
-document.getElementById('sceneNavRight').addEventListener('click', function(e) {
-  e.stopPropagation();
-  console.log('[NavRight] clicked, currentScene:', g.currentScene);
-  doSceneSwitch('incubator'); // 右按钮切到孵蛋室
-});
+// ─── 场景切换固定按钮：通过 HTML onclick 属性绑定 ───────────
 </script>
 </html>
