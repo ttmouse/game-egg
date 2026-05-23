@@ -1,4 +1,4 @@
-import { g, saveGame, loadRawSave, initTransCanvases } from './state.js';
+import { g, saveGame, loadRawSave, initTransCanvases, transOldCtx, transNewCtx, transOldCanvas, transNewCanvas } from './state.js';
 import { ctx, canvas, initCanvas } from './canvas.js';
 import {
   DAY_SEC, NGT_SEC, CYCLE, TEMP_MIN, TEMP_MAX, TEMP_OPT_MIN, TEMP_OPT_MAX,
@@ -12,6 +12,7 @@ import { initAudio, playSound, soundSynth } from './audio.js';
 import { drawText, drawTextToCtx } from './utils.js';
 import { drawIsoGround, isoToScreen, screenToIso } from './render/ground.js';
 import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim } from './render/egg.js';
+// Battle system - not yet extracted, stubs provided
 
 // ═══════════════════════════════════════════════════════════════════
 // 渲染函数
@@ -435,6 +436,7 @@ function doSynthesize() {
     }, 30);
   });
 }
+window.doSynthesize = doSynthesize;
 
 window.toggleSynthSelect = function(idx) {
   const alreadyIdx = synthSelect.indexOf(idx);
@@ -578,6 +580,7 @@ function showPetDetail(idx) {
     if (c) drawPetSprite(c, pet);
   }, 50);
 }
+window.showAlbum = showAlbum;
 
 window.setCurrentPet = function(idx) {
   g.currentPet = g.pets[idx];
@@ -596,6 +599,12 @@ window.doSceneSwitch = function(targetScene) {
   initAudio();
   playSound('sceneSwitch');
   g.sceneTransition = { active: true, progress: 0, from: g.currentScene, to: targetScene };
+};
+
+// 场景切换封装（供 HTML onclick 使用，避免暴露 g）
+window.toggleScene = function() {
+  console.log('toggleScene called, currentScene:', g.currentScene);
+  window.doSceneSwitch(g.currentScene === 'pets' ? 'incubator' : 'pets');
 };
 
 // ─── 更新函数 ───
@@ -891,6 +900,26 @@ window.resetGame = function() {
   location.reload();
 };
 
+// ─── 画布显示翻转（拉伸 ↔ 原生比例） ───
+window._canvasFlipped = false;
+window.toggleCanvasFlip = function() {
+  window._canvasFlipped = !window._canvasFlipped;
+  const canvas = document.getElementById('c');
+  const btn = document.getElementById('btnFlip');
+  if (!canvas) return;
+  if (window._canvasFlipped) {
+    // 原生比例 720x576
+    canvas.style.width = 'min(720px, 100vw)';
+    canvas.style.aspectRatio = '720 / 576';
+    if (btn) btn.innerHTML = '🔳 宽屏';
+  } else {
+    // 宽屏拉伸 1280x800
+    canvas.style.width = 'min(1280px, 100vw)';
+    canvas.style.aspectRatio = '1280 / 800';
+    if (btn) btn.innerHTML = '🔲 翻转';
+  }
+};
+
 function updateBtnUI() {
   const heatBtn = document.getElementById('btnHeat');
   if (heatBtn) {
@@ -927,6 +956,7 @@ function loop() {
 
   // Scene transition rendering
   if (g.sceneTransition.active) {
+    console.log('[transition] rendering, progress:', g.sceneTransition.progress.toFixed(2), 'from:', g.sceneTransition.from, 'to:', g.sceneTransition.to);
     initTransCanvases(canvas);
     const p = g.sceneTransition.progress;
     const ease = 1 - Math.pow(1 - p, 3);
@@ -1018,8 +1048,39 @@ export function init(c, c2d) {
       g.hatchPct = Math.min(100, g.hatchPct + offlineMins * 0.05);
       if (g.hunger !== undefined) g.hunger = Math.max(0, g.hunger - offlineMins * 0.5);
     }
+
+    // 旧存档兼容：补全缺失字段
+    if (g.sceneTransition === undefined || g.sceneTransition === null) {
+      g.sceneTransition = { active: false, progress: 0, from: 'incubator', to: 'pets' };
+    }
     if (g.nextHatchDay === undefined) g.nextHatchDay = 0;
     if (g.draggingPetId === undefined) g.draggingPetId = null;
+    if (g.heartParticles === undefined) g.heartParticles = [];
+    if (g.droppedFood === undefined) g.droppedFood = [];
+
+    // 补全宠物字段
+    g.pets.forEach(p => {
+      if (!p.scenePos) p.scenePos = { x: 0, y: 0 };
+      if (p.clickReaction === undefined) p.clickReaction = null;
+      if (p.petMood === undefined) p.petMood = 'normal';
+      if (!p.moodBubble || typeof p.moodBubble.timer !== 'number') {
+        p.moodBubble = { show: false, timer: 0 };
+      }
+      if (p.wanderTarget === undefined) p.wanderTarget = null;
+      if (p.wanderTimer === undefined) p.wanderTimer = 2 + Math.random() * 3;
+      if (p.wanderSpeed === undefined) p.wanderSpeed = 0.3 + Math.random() * 0.5;
+      if (p.facingRight === undefined) p.facingRight = true;
+      if (p.genes === undefined) p.genes = [];
+      if (p.traits === undefined) p.traits = ['普通'];
+    });
+
+    // 修复 currentPet 引用（JSON 反序列化后是副本，不是 pets 数组中的引用）
+    if (g.currentPet && g.pets.length > 0) {
+      const cp = g.pets.find(p => p.name === g.currentPet.name && p.day === g.currentPet.day);
+      if (cp) g.currentPet = cp;
+      else g.currentPet = g.pets[0];
+    }
+
     g.pets.forEach(p => recordDiscovery(p));
     arrangePetsIso();
   }
@@ -1044,6 +1105,7 @@ function setupInput(canvasEl) {
 
   canvasEl.addEventListener('click', (e) => {
     const { x: mx, y: my } = getCoords(e);
+
     if (!g.sceneTransition.active && g.draggingPetId === null && !g.dragMoved) {
       for (const pet of g.pets) {
         if (!pet.scenePos) continue;
@@ -1233,10 +1295,107 @@ function drawIsoGroundToCtx(targetCtx) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Stub functions for HTML button references (未实现功能)
+// 互动选宠系统
 // ═══════════════════════════════════════════════════════════════════
+let selectedInteractPets = [];
+
+window.showInteractSelect = function() {
+  if (g.pets.length === 0) { showToast('还没有宠物'); return; }
+  selectedInteractPets = [];
+
+  let html = '<div style="font-size:14px;margin-bottom:8px">🎮 选择要互动的宠物（可多选）</div>';
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-height:280px;overflow-y:auto;">';
+
+  g.pets.forEach((pet) => {
+    const geneStr = (pet.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
+    html += `<button id="ivt_pet_${pet.id}" onclick="toggleInteractPet(${pet.id})" style="background:#222;border:3px solid #555;color:#fff;padding:8px 10px;font-family:monospace;font-size:11px;cursor:pointer;min-width:80px;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <span style="font-size:15px">${pet.name}</span>
+      <span style="color:#aaa;font-size:9px">${pet.star}★ Lv${pet.level}</span>
+      <span style="font-size:10px">${geneStr}</span>
+    </button>`;
+  });
+
+  html += '</div>';
+  html += '<div id="ivt_hint" style="font-size:12px;color:#aaa;margin-top:8px">已选择 0 只</div>';
+  html += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;justify-content:center;">';
+  html += '<button onclick="confirmInteractPets()" style="background:#1a4a1a;border:3px solid #4CAF50;color:#fff;padding:10px 20px;font-family:monospace;font-size:13px;cursor:pointer">确认选择</button>';
+  html += '<button onclick="closeOverlay()" style="background:#333;border:3px solid #666;color:#fff;padding:10px 20px;font-family:monospace;font-size:13px;cursor:pointer">返回</button>';
+  html += '</div>';
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = html;
+  msg.style.maxWidth = '400px';
+  overlay.classList.add('show');
+};
+
+window.toggleInteractPet = function(petId) {
+  const idx = selectedInteractPets.indexOf(petId);
+  if (idx >= 0) {
+    selectedInteractPets.splice(idx, 1);
+  } else {
+    selectedInteractPets.push(petId);
+  }
+  const btn = document.getElementById('ivt_pet_' + petId);
+  if (btn) {
+    btn.style.background = selectedInteractPets.indexOf(petId) >= 0 ? '#1a3a1a' : '#222';
+    btn.style.borderColor = selectedInteractPets.indexOf(petId) >= 0 ? '#4CAF50' : '#555';
+  }
+  const hint = document.getElementById('ivt_hint');
+  if (hint) hint.textContent = `已选择 ${selectedInteractPets.length} 只`;
+};
+
+window.confirmInteractPets = function() {
+  if (selectedInteractPets.length === 0) { showToast('请至少选择一只宠物'); return; }
+  closeOverlay();
+  setTimeout(() => showGameSelect(), 50);
+};
+
+function showGameSelect() {
+  if (selectedInteractPets.length === 0) return;
+  initAudio();
+
+  const petNames = selectedInteractPets.map(id => {
+    const pet = g.pets.find(p => p.id === id);
+    return pet ? pet.name : '';
+  }).join('、');
+
+  let html = `<div style="font-size:14px;margin-bottom:8px">🎯 <span style="color:#FF69B4">${petNames}</span> 一起玩什么？</div>`;
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">';
+
+  // 扔球游戏（1只以上）
+  html += `<button onclick="startBallGame()" style="background:#1a3a1a;border:3px solid #4CAF50;color:#fff;padding:12px 16px;font-family:monospace;font-size:13px;cursor:pointer;min-width:110px;display:flex;flex-direction:column;align-items:center;gap:4px">
+    <span style="font-size:22px">⚽</span><span>扔球游戏</span><span style="color:#4CAF50;font-size:10px">快乐+10 亲密+5</span>
+  </button>`;
+
+  // 排球（2只）
+  if (selectedInteractPets.length === 2) {
+    html += `<button onclick="startVolleyballGame()" style="background:#1a1a4a;border:3px solid #6B5B95;color:#fff;padding:12px 16px;font-family:monospace;font-size:13px;cursor:pointer;min-width:110px;display:flex;flex-direction:column;align-items:center;gap:4px">
+      <span style="font-size:22px">🏐</span><span>排球</span><span style="color:#6B5B95;font-size:10px">获胜+20 经验</span>
+    </button>`;
+  }
+
+  // 战斗（暂未实现）
+  if (selectedInteractPets.length >= 2) {
+    html += `<button onclick="showToast('战斗系统开发中')" style="background:#3a1a1a;border:3px solid #E53935;color:#fff;padding:12px 16px;font-family:monospace;font-size:13px;cursor:pointer;min-width:110px;border-radius:6px">
+      ⚔️ 对战（开发中）</button>`;
+  }
+
+  html += '</div>';
+  html += '<button onclick="closeOverlay()" style="margin-top:16px;background:#333;border:3px solid #666;color:#fff;padding:10px 24px;font-family:monospace;font-size:14px;cursor:pointer">返回</button>';
+
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = html;
+  msg.style.maxWidth = '400px';
+  overlay.classList.add('show');
+}
+
+window.startBallGame = function() { showToast('⚽ 扔球游戏开发中'); closeOverlay(); };
+window.startVolleyballGame = function() { showToast('🏐 排球游戏开发中'); closeOverlay(); };
+
+// Other stubs
 window.showFeedSelect = function() { showToast('🍖 喂食功能开发中'); };
-window.showInteractSelect = function() { showToast('🎮 互动功能开发中'); };
 window.exitInteractMode = function() { showToast('已退出互动模式'); };
 window.startVoiceCommand = function() { showToast('🎤 语音功能需要运行 voice_server.py'); };
 window.executeTextCommand = function() { showToast('📝 文字指令功能开发中'); };

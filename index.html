@@ -147,8 +147,8 @@ body {
 </head>
 <body>
 <!-- 场景切换固定图标 -->
-<button id="sceneNavLeft" class="sceneNavBtn" title="切换场景" onclick="doSceneSwitch(g.currentScene==='pets'?'incubator':'pets')">◀</button>
-<button id="sceneNavRight" class="sceneNavBtn" title="切换场景" onclick="doSceneSwitch(g.currentScene==='pets'?'incubator':'pets')">▶</button>
+<button id="sceneNavLeft" class="sceneNavBtn" title="切换场景" onclick="toggleScene()">◀</button>
+<button id="sceneNavRight" class="sceneNavBtn" title="切换场景" onclick="toggleScene()">▶</button>
 <div id="wrap">
   <canvas id="c"></canvas>
   <div id="btns">
@@ -160,6 +160,7 @@ body {
     <button class="bt" id="btnBreed" onclick="doSynthesize()">⚗️ 合成<br><span class="cooldown" id="breedStatus">可用</span></button>
     <button class="bt" onclick="showAlbum()">📖 图鉴</button>
     <button class="bt" onclick="resetGame()">🔄 重开</button>
+    <button class="bt" id="btnFlip" onclick="toggleCanvasFlip()">🔲 翻转</button>
     <button class="bt" id="btnInteract" onclick="showInteractSelect()">🎮 互动<br><span class="cooldown" id="interactStatus">可用</span></button>
     <button class="bt" id="btnVoice" onclick="startVoiceCommand()">🎤 喊话<br><span class="cooldown" id="voiceStatus">可用</span></button>
     <!-- 文字指令输入框 -->

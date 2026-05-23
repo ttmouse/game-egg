@@ -7,7 +7,7 @@ import { drawText, drawTextToCtx } from '../utils.js';
 // ─── Egg & Incubator Drawing ────────────────────────────────────
 
 export function drawIncubator() {
-  const bx = 234 + 280, by = 290, bw = 252, bh = 100;
+  const bx = 234, by = 290, bw = 252, bh = 100;
 
   ctx.fillStyle = P.incBase;
   ctx.fillRect(bx, by, bw, bh);
@@ -66,8 +66,7 @@ export function drawIncubatorToCtx(targetCtx) {
 }
 
 export function drawEgg() {
-  const offset = 280;
-  const ex = 360 + offset, ey = 230;
+  const ex = 360, ey = 230;
   const eggW = 60, eggH = 82;
 
   if (g.hatchPct >= 100 || g.isHatching) { drawHatchingAnim(); return; }
@@ -167,7 +166,7 @@ export function drawEggToCtx(targetCtx) {
 
 export function drawHatchingAnim() {
   const t = Date.now() / 200;
-  const cx = 640, cy = 300;
+  const cx = 360, cy = 300;
   ctx.fillStyle = P.eggLight;
   for (let i = 0; i < 6; i++) {
     const px = cx - 60 + i * 24 + Math.sin(t + i) * 12;

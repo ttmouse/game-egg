@@ -1,4 +1,5 @@
 import { g } from '../state.js';
+import { ctx, canvas } from '../canvas.js';
 import { OX, OY } from '../config.js';
 
 export function drawIsoGround() {
