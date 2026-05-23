@@ -276,14 +276,23 @@ function drawHUD() {
 
 function drawFeedInventory() {
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(0, canvas.height - 56, canvas.width, 56);
-  drawText('道具', 8, canvas.height - 46, P.dim, 1);
-  drawText(`虫${g.inventory.worm}`, 76, canvas.height - 46, g.inventory.worm > 0 ? P.txt : P.dim, 1);
-  drawText(`果${g.inventory.fruit}`, 144, canvas.height - 46, g.inventory.fruit > 0 ? P.txt : P.dim, 1);
-  drawText(`饲${g.inventory.treat}`, 212, canvas.height - 46, g.inventory.treat > 0 ? P.heart : P.dim, 1);
-  const heatStr = g.heatOn ? (g.power > 0 ? '加热中' : '无电量') : (g.iceOn ? '冰敷中' : '加热关');
-  const hColor = g.heatOn ? (g.power > 0 ? P.danger : P.dim) : (g.iceOn ? '#00BFFF' : P.dim);
-  drawText(heatStr, 600, canvas.height - 46, hColor, 1);
+  ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+  const yy = canvas.height - 32;
+  // 道具图标
+  drawIcn('🧰', 10, yy, '#aaa', 1.0);
+  drawIcn(`🪱${g.inventory.worm}`, 44, yy, g.inventory.worm > 0 ? '#fff' : '#555', 1.0);
+  drawIcn(`🍎${g.inventory.fruit}`, 94, yy, g.inventory.fruit > 0 ? '#fff' : '#555', 1.0);
+  drawIcn(`🍪${g.inventory.treat}`, 144, yy, g.inventory.treat > 0 ? '#fff' : '#555', 1.0);
+  // 分隔线
+  ctx.fillStyle = '#444';
+  ctx.fillRect(200, canvas.height - 34, 1, 28);
+  // 加热/冰袋状态（图标化）
+  let heatIcn = '', heatClr = P.dim;
+  if (g.heatOn && g.power > 0) { heatIcn = '🔥加热中'; heatClr = '#FF4500'; }
+  else if (g.heatOn) { heatIcn = '🔥零电'; heatClr = P.dim; }
+  else if (g.iceOn) { heatIcn = '🧊冰敷'; heatClr = '#00BFFF'; }
+  else { heatIcn = '❄关'; heatClr = '#555'; }
+  drawIcn(heatIcn, 570, yy, heatClr, 1.0);
 }
 
 // ═══════════════════════════════════════════════════════════════════
