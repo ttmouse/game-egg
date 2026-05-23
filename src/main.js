@@ -10,9 +10,11 @@ if (document.readyState === 'loading') {
 function start() {
   const canvas = document.getElementById('c');
   if (!canvas) { console.error('Canvas not found'); return; }
-  canvas.width = 720;
-  canvas.height = 576;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 720 * dpr;
+  canvas.height = 576 * dpr;
   const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
   ctx.imageSmoothingEnabled = false;
   init(canvas, ctx);
 }
