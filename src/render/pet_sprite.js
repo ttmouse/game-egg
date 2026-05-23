@@ -179,24 +179,50 @@ export function drawPetSprite(canvas, pet, animTime) {
     ctx.fillStyle = '#222'; ctx.fillRect(cx-6, headY, 4, 2); ctx.fillRect(cx+2, headY, 4, 2);
     ctx.fillRect(cx-8, headY+1, 2, 1); ctx.fillRect(cx+6, headY+1, 2, 1);
   } else {
-    ctx.fillStyle = '#222';
     if (petType === 0) {
-      ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.arc(cx-6, headY, 6, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx+6, headY, 6, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#7CFC00'; ctx.beginPath(); ctx.arc(cx-6, headY, 5, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx+6, headY, 5, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx-6, headY+0.5, 2.5, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx+6, headY+0.5, 2.5, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(cx-4, headY-2, 1.8, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx+8, headY-2, 1.8, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgba(255,182,193,0.4)'; ctx.beginPath(); ctx.arc(cx-6, headY, 6, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx+6, headY, 6, 0, Math.PI*2); ctx.fill();
+      // 猫 — 小圆绿眼
+      ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.arc(cx-6, headY, 4, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+6, headY, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#7CFC00'; ctx.beginPath(); ctx.arc(cx-6, headY, 3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+6, headY, 3, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx-6, headY+0.5, 2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+6, headY+0.5, 2, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(cx-5, headY-1, 1.3, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+7, headY-1, 1.3, 0, Math.PI*2); ctx.fill();
+    } else if (petType === 1) {
+      // 狗 — 圆棕眼
+      ctx.fillStyle = '#3E2723'; ctx.beginPath(); ctx.arc(cx-6, headY, 4, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+6, headY, 4, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx-6, headY, 2.5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+6, headY, 2.5, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.beginPath(); ctx.arc(cx-5, headY-1, 1.2, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx+7, headY-1, 1.2, 0, Math.PI*2); ctx.fill();
     } else if (petType === 2) {
+      // 兔 — 大红方眼
       ctx.fillRect(cx-7, headY-2, 6, 6); ctx.fillRect(cx+1, headY-2, 6, 6);
       ctx.fillStyle = '#FF4444'; ctx.fillRect(cx-7, headY-2, 6, 6); ctx.fillRect(cx+1, headY-2, 6, 6);
+      ctx.fillStyle = '#800'; ctx.fillRect(cx-6, headY-1, 2, 2); ctx.fillRect(cx+2, headY-1, 2, 2);
+    } else if (petType === 3) {
+      // 狐 — 细长眯眼
+      ctx.fillStyle = '#222'; ctx.fillRect(cx-9, headY-1, 6, 2); ctx.fillRect(cx+3, headY-1, 6, 2);
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx-8, headY, 2, 1); ctx.fillRect(cx+6, headY, 2, 1);
+    } else if (petType === 4) {
+      // 鼠 — 小黑点眼
+      ctx.fillStyle = '#111'; ctx.fillRect(cx-5, headY, 3, 3); ctx.fillRect(cx+2, headY, 3, 3);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(cx-4, headY, 1, 1); ctx.fillRect(cx+3, headY, 1, 1);
+    } else if (petType === 5) {
+      // 龙 — 竖瞳爬行眼
+      ctx.fillStyle = '#FF8C00'; ctx.fillRect(cx-8, headY-2, 5, 6); ctx.fillRect(cx+3, headY-2, 5, 6);
+      ctx.fillStyle = '#111'; ctx.fillRect(cx-7, headY-1, 3, 4); ctx.fillRect(cx+4, headY-1, 3, 4);
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx-6, headY-3, 1, 1); ctx.fillRect(cx+5, headY-3, 1, 1);
+    } else if (petType === 6) {
+      // 鸟 — 小圆珠眼
+      ctx.fillStyle = '#222'; ctx.fillRect(cx-5, headY-1, 3, 4); ctx.fillRect(cx+2, headY-1, 3, 4);
+      ctx.fillStyle = '#fff'; ctx.fillRect(cx-4, headY-1, 1, 1); ctx.fillRect(cx+3, headY-1, 1, 1);
     } else {
-      ctx.fillRect(cx-7, headY-2, 6, 6); ctx.fillRect(cx+1, headY-2, 6, 6);
-      ctx.fillStyle = '#fff'; ctx.fillRect(cx-6, headY-1, 2, 2); ctx.fillRect(cx+2, headY-1, 2, 2);
+      // 熊 — 小圆点眼
+      ctx.fillStyle = '#111'; ctx.fillRect(cx-5, headY, 3, 3); ctx.fillRect(cx+2, headY, 3, 3);
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(cx-4, headY, 1, 1); ctx.fillRect(cx+3, headY, 1, 1);
     }
   }
 
