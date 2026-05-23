@@ -1860,7 +1860,7 @@ function executeVoiceCommand(text) {
         pet.clickReaction = { type: 'bounce', time: 0 };
         playPetSound(PET_SOUNDS[getPetType(pet)]);
         showToast(pet.name + '：第' + (i + 1) + '！', 2);
-      }, i * 800);
+      }, i * 180);
     });
     showToast('🐾 ' + count + '只宠物报数！');
     return;
