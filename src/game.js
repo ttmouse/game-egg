@@ -1099,6 +1099,14 @@ function setupInput(canvasEl) {
   canvasEl.addEventListener('click', (e) => {
     const { x: mx, y: my } = getCoords(e);
 
+    // 小游戏结束后点击退出
+    if (g.interactGame === 'ball' && ballGame && ballGame.state === 'done') {
+      endBallGame(); return;
+    }
+    if (g.interactGame === 'volleyball' && volleyGame && volleyGame.state === 'done') {
+      endVolleyballGame(); return;
+    }
+
     if (!g.sceneTransition.active && g.draggingPetId === null && !g.dragMoved) {
       for (const pet of g.pets) {
         if (!pet.scenePos) continue;
@@ -1139,6 +1147,14 @@ function setupInput(canvasEl) {
   canvasEl.addEventListener('mousedown', (e) => {
     if (g.sceneTransition.active) return;
     const { x, y } = getCoords(e);
+    // 排球拖拽发球
+    if (g.interactGame === 'volleyball') { onVolleyDragStart(x, y); return; }
+    // 扔球拖拽
+    if (g.interactGame === 'ball' && ballGame && ballGame.state === 'aim') {
+      ballGame.dragStart = { x, y };
+      ballGame.dragEnd = { x, y };
+      return;
+    }
     for (const pet of g.pets) {
       if (!pet.scenePos) continue;
       const dx = x - pet.scenePos.x, dy = y - (pet.scenePos.y - TILE_H/2);
@@ -1154,6 +1170,14 @@ function setupInput(canvasEl) {
   });
 
   canvasEl.addEventListener('mousemove', (e) => {
+    const { x, y } = getCoords(e);
+    // 排球拖拽移动
+    if (g.interactGame === 'volleyball') { onVolleyDragMove(x, y); return; }
+    // 扔球拖拽移动
+    if (g.interactGame === 'ball' && ballGame && ballGame.dragStart) {
+      ballGame.dragEnd = { x, y };
+      return;
+    }
     if (g.draggingPetId !== null) {
       const { x, y } = getCoords(e);
       const pet = g.pets.find(p => p.id === g.draggingPetId);
@@ -1180,6 +1204,25 @@ function setupInput(canvasEl) {
   });
 
   canvasEl.addEventListener('mouseup', () => {
+    // 排球拖拽结束
+    if (g.interactGame === 'volleyball') { onVolleyDragEnd(); return; }
+    // 扔球拖拽结束
+    if (g.interactGame === 'ball' && ballGame && ballGame.dragStart) {
+      const ds = ballGame.dragStart, de = ballGame.dragEnd;
+      if (ds && de) {
+        const dx = de.x - ds.x, dy = de.y - ds.y;
+        const power = Math.min(Math.sqrt(dx*dx + dy*dy) * 2.5, 500);
+        const angle = Math.atan2(dy, dx);
+        ballGame.ball.vx = Math.cos(angle) * power;
+        ballGame.ball.vy = Math.sin(angle) * power;
+        ballGame.ball.thrown = true;
+        ballGame.state = 'throw';
+        playSound('pet');
+      }
+      ballGame.dragStart = null;
+      ballGame.dragEnd = null;
+      return;
+    }
     if (g.draggingPetId !== null) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && g.dragMoved) {
@@ -1206,6 +1249,14 @@ function setupInput(canvasEl) {
     const rect = canvasEl.getBoundingClientRect();
     const x = (touch.clientX - rect.left) * (720 / rect.width);
     const y = (touch.clientY - rect.top) * (576 / rect.height);
+    // 排球拖拽
+    if (g.interactGame === 'volleyball') { onVolleyDragStart(x, y); return; }
+    // 扔球拖拽
+    if (g.interactGame === 'ball' && ballGame && ballGame.state === 'aim') {
+      ballGame.dragStart = { x, y };
+      ballGame.dragEnd = { x, y };
+      return;
+    }
     for (const pet of g.pets) {
       if (!pet.scenePos) continue;
       const dx = x - pet.scenePos.x, dy = y - (pet.scenePos.y - TILE_H/2);
@@ -1221,6 +1272,15 @@ function setupInput(canvasEl) {
 
   canvasEl.addEventListener('touchmove', (e) => {
     e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvasEl.getBoundingClientRect();
+    const x = (touch.clientX - rect.left) * (720 / rect.width);
+    const y = (touch.clientY - rect.top) * (576 / rect.height);
+    if (g.interactGame === 'volleyball') { onVolleyDragMove(x, y); return; }
+    if (g.interactGame === 'ball' && ballGame && ballGame.dragStart) {
+      ballGame.dragEnd = { x, y };
+      return;
+    }
     if (g.draggingPetId !== null) {
       const touch = e.touches[0];
       const rect = canvasEl.getBoundingClientRect();
@@ -1237,6 +1297,26 @@ function setupInput(canvasEl) {
 
   canvasEl.addEventListener('touchend', (e) => {
     e.preventDefault();
+    // 小游戏结束触摸退出
+    if (g.interactGame === 'ball' && ballGame && ballGame.state === 'done') { endBallGame(); return; }
+    if (g.interactGame === 'volleyball' && volleyGame && volleyGame.state === 'done') { endVolleyballGame(); return; }
+    if (g.interactGame === 'volleyball') { onVolleyDragEnd(); return; }
+    if (g.interactGame === 'ball' && ballGame && ballGame.dragStart) {
+      const ds = ballGame.dragStart, de = ballGame.dragEnd;
+      if (ds && de) {
+        const dx = de.x - ds.x, dy = de.y - ds.y;
+        const power = Math.min(Math.sqrt(dx*dx + dy*dy) * 2.5, 500);
+        const angle = Math.atan2(dy, dx);
+        ballGame.ball.vx = Math.cos(angle) * power;
+        ballGame.ball.vy = Math.sin(angle) * power;
+        ballGame.ball.thrown = true;
+        ballGame.state = 'throw';
+        playSound('pet');
+      }
+      ballGame.dragStart = null;
+      ballGame.dragEnd = null;
+      return;
+    }
     if (g.draggingPetId !== null) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && g.dragMoved) {
@@ -1409,8 +1489,8 @@ function showGameSelect() {
 
   // 战斗（暂未实现）
   if (selectedInteractPets.length >= 2) {
-    html += `<button onclick="showToast('战斗系统开发中')" style="background:#3a1a1a;border:3px solid #E53935;color:#fff;padding:12px 16px;font-family:monospace;font-size:13px;cursor:pointer;min-width:110px;border-radius:6px">
-      ⚔️ 对战（开发中）</button>`;
+    html += `<button onclick="showBattleSelect()" style="background:#3a1a1a;border:3px solid #E53935;color:#fff;padding:12px 16px;font-family:monospace;font-size:13px;cursor:pointer;min-width:110px;border-radius:6px">
+      ⚔️ 对战</button>`;
   }
 
   html += '</div>';
@@ -2554,11 +2634,11 @@ function onVolleyDragEnd() {
 
 // ─── 战斗系统 ───
 
-function showBattleSelect() {
+window.showBattleSelect = function showBattleSelect() {
   closeOverlay();
   initAudio();
 
-  const availablePets = g.pets.filter(p => p.restUntil <= Date.now());
+  const availablePets = g.pets.filter(p => !p.restUntil || p.restUntil <= Date.now());
 
   let html = '<div style="font-size:13px;margin-bottom:6px;text-align:center">⚔️ 宠物战斗 — 分配队伍</div>';
   html += '<div style="font-size:11px;color:#aaa;margin-bottom:8px;text-align:center">点击宠物切换队伍（蓝=A队 / 红=B队）</div>';
@@ -3439,6 +3519,7 @@ function cancelToolMode() {
   canvas.style.cursor = 'default';
   showToast('已取消道具模式');
 }
+window.cancelToolMode = cancelToolMode;
 
 // ─── 商店系统 ───
 
@@ -3513,6 +3594,7 @@ function buyTool(toolKey, price) {
   saveGame();
   openShop(); // 刷新商店
 }
+window.openShop = openShop;
 
 // ─── 喂食系统 ───
 
@@ -3606,6 +3688,8 @@ function doFeedItem(type) {
   updateBtnUI();
   saveGame();
 }
+window.doFeedItem = doFeedItem;
+window.showFeedSelect = showFeedSelect;
 
 // ─── 互动/其他 ───
 
@@ -3622,6 +3706,7 @@ function exitInteractMode() {
   document.getElementById('exitInteractBtn').style.display = 'none';
   showToast('已退出互动模式');
 }
+window.exitInteractMode = exitInteractMode;
 
 function cancelInteract() {
   selectedInteractPets = [];
