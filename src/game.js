@@ -1439,11 +1439,20 @@ function setupInput(canvasEl) {
 // 控制台调试指令
 // ═══════════════════════════════════════════════════════════════════
 // 在浏览器控制台运行 spawnPet() 即可新增一只随机宠物
-window.spawnPet = function() {
+// 可选参数: spawnPet(0~7) 指定类型 (0猫 1狗 2兔子 3狐狸 4鼠 5龙 6鸟 7熊)
+window.spawnPet = function(typeIdx) {
   const nameList = ['小球', '毛球', '豆豆', '噗噗', '咪咪', '爪爪', '果冻', '棉花', '糖糖', '泡泡'];
+  const petTypeNames = ['猫', '狗', '兔子', '狐狸', '鼠', '龙', '鸟', '熊'];
   const traits = ['活泼', '害羞', '贪吃', '懒散', '好奇', '忠诚', '倔强', '温柔'];
   const randomGene = () => Object.keys(GENES)[Math.floor(Math.random() * Object.keys(GENES).length)];
-  const name = nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
+  // 如果指定了类型，反复生成名字直到哈希匹配
+  const genName = () => nameList[Math.floor(Math.random() * nameList.length)] + Math.floor(Math.random() * 99);
+  let name = genName();
+  if (typeIdx !== undefined) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xFFFF;
+    while (h % 8 !== typeIdx) { name = genName(); h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xFFFF; }
+  }
   const star = Math.random() < 0.7 ? 1 : (Math.random() < 0.7 ? 2 : 3);
   const pet = {
     id: 'pet_' + Date.now(),
@@ -1475,8 +1484,9 @@ window.spawnPet = function() {
   };
   g.pets.push(pet);
   saveGame();
-  console.log('✅ 新宠物 "' + name + '" 生成！基因:', pet.genes.join(''), '星星:', pet.star + '★', '总宠物数:', g.pets.length);
-  showToast('🥚 新宠物 "' + name + '"！');
+  const petTypeIdx = (() => { let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))&0xFFFF; return h%8; })();
+  console.log('✅ 新宠物 "' + name + '" [' + petTypeNames[petTypeIdx] + '] 基因:', pet.genes.join(''), '星星:', pet.star + '★', '总宠物数:', g.pets.length);
+  showToast('🥚 新宠物 "' + name + '"（' + petTypeNames[petTypeIdx] + '）！');
 };
 
 // ═══════════════════════════════════════════════════════════════════
