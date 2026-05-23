@@ -14,6 +14,9 @@ import { drawIsoGround, isoToScreen, screenToIso, drawSunMoonToCtx } from './ren
 import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim, drawHatchingAnimToCtx } from './render/egg.js';
 import { drawPetSprite } from './render/pet_sprite.js';
 
+const LOG_W = 720;
+const LOG_H = 576;
+
 // ─── 游戏状态变量（从原始版恢复） ───
 
 let ballGame = null
@@ -35,12 +38,12 @@ function getPetSpriteCanvas(pet) {
     return cached.canvas;
   }
   // 创建新的精灵 canvas
-  const canvas = document.createElement('canvas');
-  canvas.width = 48;
-  canvas.height = 48;
-  drawPetSprite(canvas, pet, 0);
-  petSpriteCache.set(cacheKey, { canvas, timestamp: Date.now() });
-  return canvas;
+  const cvs = document.createElement('canvas');
+  cvs.width = 48;
+  cvs.height = 48;
+  drawPetSprite(cvs, pet, 0);
+  petSpriteCache.set(cacheKey, { canvas: cvs, timestamp: Date.now() });
+  return cvs;
 }
 
 function drawSunMoon() {
@@ -226,76 +229,76 @@ function drawIcn(text, x, y, color, scale = 1.3) {
 
 function drawHUD() {
   ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(0, 0, canvas.width, 80);
+  ctx.fillRect(0, 0, LOG_W, 80);
   const Y1 = 6, Y2 = 40;
 
-  // ── 第一行：时间 · 孵化 · 温度 · 电量 · 宠物 ──
+  // ── 第一行 ──
   const timeIcon = g.isDay ? '☀' : '🌙';
   const rem = g.isDay ? DAY_SEC - g.time : NGT_SEC - (g.time - DAY_SEC);
   drawIcn(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, 6, Y1, P.txt, 1.1);
 
-  // 孵化进度
-  drawIcn('🥚', 112, Y1, '#aaa', 1.2);
+  // 孵化
+  drawIcn('🥚', 78, Y1, '#aaa', 1.1);
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(134, Y1 + 4, 76, 10);
+  ctx.fillRect(100, Y1 + 4, 70, 8);
   const hatchColor = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
   ctx.fillStyle = hatchColor;
-  ctx.fillRect(134, Y1 + 4, Math.floor(76 * g.hatchPct / 100), 10);
-  drawIcn(`${Math.floor(g.hatchPct)}%`, 214, Y1, hatchColor, 1.1);
+  ctx.fillRect(100, Y1 + 4, Math.floor(70 * g.hatchPct / 100), 8);
+  drawIcn(`${Math.floor(g.hatchPct)}%`, 174, Y1, hatchColor, 1.0);
 
   // 温度
   const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
   const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
-  drawIcn(`🌡${g.temp.toFixed(0)}°`, 270, Y1, tempColor, 1.2);
+  drawIcn(`🌡${g.temp.toFixed(0)}°`, 260, Y1, tempColor, 1.1);
 
   // 电量
   const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
-  drawIcn(`⚡${Math.floor(g.power)}`, 360, Y1, pColor, 1.2);
+  drawIcn(`⚡${Math.floor(g.power)}`, 350, Y1, pColor, 1.1);
 
-  // 宠物总数
-  drawIcn(`🐾${g.pets.length}`, 450, Y1, '#aaa', 1.2);
+  // 宠物
+  drawIcn(`🐾${g.pets.length}`, 440, Y1, '#aaa', 1.1);
 
-  // ── 第二行：天数 · 饥饿 · 加热状态 ──
+  // ── 第二行 ──
   drawIcn(`📅${g.dayCount}天`, 6, Y2, '#aaa', 1.1);
 
   if (g.currentPet) {
     const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
-    drawIcn('🍖', 86, Y2, '#aaa', 1.2);
+    drawIcn('🍖', 100, Y2, '#aaa', 1.1);
     ctx.fillStyle = P.barBg;
-    ctx.fillRect(110, Y2 + 4, 76, 10);
+    ctx.fillRect(122, Y2 + 4, 70, 8);
     ctx.fillStyle = hungerColor;
-    ctx.fillRect(110, Y2 + 4, Math.floor(76 * g.hunger / 100), 10);
-    drawIcn(`${Math.floor(g.hunger)}`, 190, Y2, hungerColor, 1.1);
+    ctx.fillRect(122, Y2 + 4, Math.floor(70 * g.hunger / 100), 8);
+    drawIcn(`${Math.floor(g.hunger)}`, 196, Y2, hungerColor, 1.0);
   }
 
-  // 加热/冰袋状态（右上角）
+  // 加热/冰袋（右上角）
   let heatIcon = '', heatClr = P.dim;
   if (g.heatOn && g.power > 0) { heatIcon = '🔥加'; heatClr = '#FF4500'; }
   else if (g.heatOn) { heatIcon = '🔥零电'; heatClr = P.dim; }
-  else if (g.iceOn) { heatIcon = '🧊冰'; heatClr = '#00BFFF'; }
-  else { heatIcon = '❄关'; heatClr = P.dim; }
-  drawIcn(heatIcon, 640, Y1, heatClr, 1.2);
+  else if (g.iceOn) { heatIcon = '🧊'; heatClr = '#00BFFF'; }
+  else { heatIcon = '❄'; heatClr = P.dim; }
+  drawIcn(heatIcon, 680, Y1, heatClr, 1.1);
 }
 
 function drawFeedInventory() {
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
-  const yy = canvas.height - 32;
-  // 道具图标
-  drawIcn('🧰', 10, yy, '#aaa', 1.0);
+  ctx.fillRect(0, LOG_H - 40, LOG_W, 40);
+  const yy = LOG_H - 32;
+  // 道具图标（均匀间隔）
+  drawIcn('🧰', 8, yy, '#aaa', 1.0);
   drawIcn(`🪱${g.inventory.worm}`, 44, yy, g.inventory.worm > 0 ? '#fff' : '#555', 1.0);
-  drawIcn(`🍎${g.inventory.fruit}`, 94, yy, g.inventory.fruit > 0 ? '#fff' : '#555', 1.0);
-  drawIcn(`🍪${g.inventory.treat}`, 144, yy, g.inventory.treat > 0 ? '#fff' : '#555', 1.0);
+  drawIcn(`🍎${g.inventory.fruit}`, 104, yy, g.inventory.fruit > 0 ? '#fff' : '#555', 1.0);
+  drawIcn(`🍪${g.inventory.treat}`, 164, yy, g.inventory.treat > 0 ? '#fff' : '#555', 1.0);
   // 分隔线
   ctx.fillStyle = '#444';
-  ctx.fillRect(200, canvas.height - 34, 1, 28);
-  // 加热/冰袋状态（图标化）
+  ctx.fillRect(220, LOG_H - 34, 1, 28);
+  // 加热/冰袋状态
   let heatIcn = '', heatClr = P.dim;
-  if (g.heatOn && g.power > 0) { heatIcn = '🔥加热中'; heatClr = '#FF4500'; }
-  else if (g.heatOn) { heatIcn = '🔥零电'; heatClr = P.dim; }
-  else if (g.iceOn) { heatIcn = '🧊冰敷'; heatClr = '#00BFFF'; }
-  else { heatIcn = '❄关'; heatClr = '#555'; }
-  drawIcn(heatIcn, 570, yy, heatClr, 1.0);
+  if (g.heatOn && g.power > 0) { heatIcn = '🔥中'; heatClr = '#FF4500'; }
+  else if (g.heatOn) { heatIcn = '🔥无电'; heatClr = P.dim; }
+  else if (g.iceOn) { heatIcn = '🧊'; heatClr = '#00BFFF'; }
+  else { heatIcn = '❄'; heatClr = '#555'; }
+  drawIcn(heatIcn, 670, yy, heatClr, 1.0);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1035,7 +1038,7 @@ function loop() {
     }
   }
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0, 0, LOG_W, LOG_H);
 
   // Scene transition rendering
   if (g.sceneTransition.active) {
@@ -1044,8 +1047,8 @@ function loop() {
     const p = g.sceneTransition.progress;
     const ease = 1 - Math.pow(1 - p, 3);
     const toPets = g.sceneTransition.to === 'pets';
-    const oldOffset = Math.round((toPets ? ease : -ease) * canvas.width);
-    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * canvas.width);
+    const oldOffset = Math.round((toPets ? ease : -ease) * LOG_W);
+    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * LOG_W);
 
     // Render old scene
     drawIsoGroundToCtx(transOldCtx);
@@ -1121,7 +1124,7 @@ function loop() {
     }
   }
 
-  drawText(g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间', 590, 8, '#aaa', 1);
+  drawText(g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间', 700, 8, '#aaa', 1);
   drawHUD();
   drawFeedInventory();
   updateBtnUI();
@@ -1199,7 +1202,12 @@ export function init(c, c2d) {
 function setupInput(canvasEl) {
   const getCoords = (e) => {
     const rect = canvasEl.getBoundingClientRect();
-    return { x: (e.clientX - rect.left) * (720 / rect.width), y: (e.clientY - rect.top) * (576 / rect.height) };
+    // 使用 clientWidth/Height 排除 border 影响，映射到逻辑坐标 720x576
+    const cw = canvasEl.clientWidth;
+    const ch = canvasEl.clientHeight;
+    const px = (e.clientX - rect.left - (rect.width - cw) / 2);
+    const py = (e.clientY - rect.top - (rect.height - ch) / 2);
+    return { x: px * (720 / cw), y: py * (576 / ch) };
   };
 
   canvasEl.addEventListener('click', (e) => {
@@ -1383,10 +1391,7 @@ function setupInput(canvasEl) {
   // Touch support
   canvasEl.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    const touch = e.touches[0];
-    const rect = canvasEl.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) * (720 / rect.width);
-    const y = (touch.clientY - rect.top) * (576 / rect.height);
+    const { x, y } = getCoords(e.touches[0]);
     // 排球拖拽
     if (g.interactGame === 'volleyball') { onVolleyDragStart(x, y); return; }
     // 扔球拖拽
@@ -1410,20 +1415,13 @@ function setupInput(canvasEl) {
 
   canvasEl.addEventListener('touchmove', (e) => {
     e.preventDefault();
-    const touch = e.touches[0];
-    const rect = canvasEl.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) * (720 / rect.width);
-    const y = (touch.clientY - rect.top) * (576 / rect.height);
+    const { x, y } = getCoords(e.touches[0]);
     if (g.interactGame === 'volleyball') { onVolleyDragMove(x, y); return; }
     if (g.interactGame === 'ball' && ballGame && ballGame.dragStart) {
       ballGame.dragEnd = { x, y };
       return;
     }
     if (g.draggingPetId !== null) {
-      const touch = e.touches[0];
-      const rect = canvasEl.getBoundingClientRect();
-      const x = (touch.clientX - rect.left) * (720 / rect.width);
-      const y = (touch.clientY - rect.top) * (576 / rect.height);
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && pet.scenePos) {
         pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
@@ -2256,13 +2254,13 @@ function drawBallGame(ctx) {
 
   // 背景
   ctx.fillStyle = '#1a2a1a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, LOG_W, LOG_H);
 
   // 草地
   ctx.fillStyle = '#2a4a2a';
-  ctx.fillRect(0, 350, canvas.width, canvas.height - 350);
+  ctx.fillRect(0, 350, LOG_W, LOG_H - 350);
   ctx.fillStyle = '#3a5a3a';
-  ctx.fillRect(0, 350, canvas.width, 6);
+  ctx.fillRect(0, 350, LOG_W, 6);
 
   // 标题
   ctx.fillStyle = '#fff';
@@ -2631,13 +2629,13 @@ function drawVolleyballGame(ctx) {
 
   // 天空
   ctx.fillStyle = '#1a2a4a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, LOG_W, LOG_H);
 
   // 地面
   ctx.fillStyle = '#2a6a2a';
-  ctx.fillRect(0, vg.groundY, canvas.width, canvas.height - vg.groundY);
+  ctx.fillRect(0, vg.groundY, LOG_W, LOG_H - vg.groundY);
   ctx.fillStyle = '#3a8a3a';
-  ctx.fillRect(0, vg.groundY, canvas.width, 6);
+  ctx.fillRect(0, vg.groundY, LOG_W, 6);
 
   // 场地线
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -3152,15 +3150,15 @@ function drawBattle(ctx) {
 
   // 背景
   ctx.fillStyle = '#0a0a1a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, LOG_W, LOG_H);
 
   // 地面装饰
   ctx.fillStyle = '#1a2a1a';
-  ctx.fillRect(0, 480, canvas.width, canvas.height - 480);
+  ctx.fillRect(0, 480, LOG_W, LOG_H - 480);
   ctx.strokeStyle = '#2a3a2a';
   ctx.lineWidth = 1;
-  for (let x = 0; x < canvas.width; x += 40) {
-    ctx.beginPath(); ctx.moveTo(x, 480); ctx.lineTo(x + 20, canvas.height); ctx.stroke();
+  for (let x = 0; x < LOG_W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 480); ctx.lineTo(x + 20, LOG_H); ctx.stroke();
   }
 
   // 中央分隔线
@@ -3285,7 +3283,7 @@ function drawBattle(ctx) {
   // 结果界面
   if (battleState.animPhase === 'result') {
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, LOG_W, LOG_H);
     ctx.fillStyle = '#FFD700';
     ctx.font = 'bold 32px monospace';
     ctx.fillText(battleState.resultMsg, 360 - ctx.measureText(battleState.resultMsg).width / 2, 250);
@@ -3308,10 +3306,10 @@ function drawBattleSkillUI(ctx) {
 
   // 底部面板
   ctx.fillStyle = 'rgba(15,15,30,0.95)';
-  ctx.fillRect(0, 400, canvas.width, canvas.height - 400);
+  ctx.fillRect(0, 400, LOG_W, LOG_H - 400);
   ctx.strokeStyle = '#444';
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(canvas.width, 400); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(LOG_W, 400); ctx.stroke();
 
   if (battleState.animPhase === 'skillSelect' && alive) {
     // 显示当前行动宠物
