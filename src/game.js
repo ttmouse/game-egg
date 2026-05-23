@@ -1109,7 +1109,7 @@ function loop() {
   }
 
   drawText(g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间', 590, 8, '#aaa', 1);
-  drawHUD();
+  if (hudVisible) drawHUD();
   drawFeedInventory();
   updateBtnUI();
   requestAnimationFrame(loop);
@@ -1182,11 +1182,17 @@ export function init(c, c2d) {
 // ═══════════════════════════════════════════════════════════════════
 // 输入处理
 // ═══════════════════════════════════════════════════════════════════
+
+let hudVisible = false;  // HUD 默认隐藏，鼠标悬停时显示
+
 function setupInput(canvasEl) {
   const getCoords = (e) => {
     const rect = canvasEl.getBoundingClientRect();
     return { x: (e.clientX - rect.left) * (720 / rect.width), y: (e.clientY - rect.top) * (576 / rect.height) };
   };
+
+  canvasEl.addEventListener('mouseenter', () => { hudVisible = true; });
+  canvasEl.addEventListener('mouseleave', () => { hudVisible = false; });
 
   canvasEl.addEventListener('click', (e) => {
     const { x: mx, y: my } = getCoords(e);
