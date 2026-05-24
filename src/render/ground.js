@@ -6,14 +6,35 @@ export function drawIsoGround() {
   if (g.isDay) {
     ctx.fillStyle = '#3d8b37';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#1a4515';
-    ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
   } else {
     ctx.fillStyle = '#1f4a1f';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0a120a';
-    ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
   }
+  drawIsoGrid();
+}
+
+function drawIsoGrid() {
+  const baseColor = g.isDay ? '#2d7b27' : '#0f3a0f';
+  ctx.strokeStyle = baseColor;
+  ctx.lineWidth = 1;
+  // 用连续直线画等距网格，效率远高于逐个画菱形
+  const MIN = -10, MAX = 16;
+  ctx.beginPath();
+  // 方向 1：固定 col，遍历 row（从右上到左下方向）
+  for (let col = MIN; col <= MAX; col++) {
+    const p1 = isoToScreen(col, MIN);
+    ctx.moveTo(p1.x, p1.y);
+    const p2 = isoToScreen(col, MAX);
+    ctx.lineTo(p2.x, p2.y);
+  }
+  // 方向 2：固定 row，遍历 col（从左下到右上方向）
+  for (let row = MIN; row <= MAX; row++) {
+    const p1 = isoToScreen(MIN, row);
+    ctx.moveTo(p1.x, p1.y);
+    const p2 = isoToScreen(MAX, row);
+    ctx.lineTo(p2.x, p2.y);
+  }
+  ctx.stroke();
 }
 
 export function drawBg() {

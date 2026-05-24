@@ -1,72 +1,178 @@
 import { ctx, canvas } from '../canvas.js';
 import { g, petSpriteCache, saveGame } from '../state.js';
-import { P, STAR_COLORS, GENES, EXP_TABLE, TEMP_OPT_MAX } from '../config.js';
+import { P, STAR_COLORS, GENES, EXP_TABLE, TEMP_OPT_MIN, TEMP_OPT_MAX } from '../config.js';
 import { drawIsoGround } from './ground.js';
 import { drawText, drawTextToCtx } from '../utils.js';
 
 // ─── Egg & Incubator Drawing ────────────────────────────────────
 
 export function drawIncubator() {
-  const bx = 234, by = 290, bw = 252, bh = 100;
+  ctx.save();
+  // 等距 3D 孵化器盒子
+  // 顶部菱形中心在 iso 网格 col=2, row=1 → (400, 210)
+  const cx = 360, cy = 285;
+  const hw = 64, hh = 32;
+  const bh = 36;
 
+  // ── 右侧面（最暗） ──
+  ctx.fillStyle = '#3a1010';
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.lineTo(cx, cy + hh + bh);
+  ctx.lineTo(cx + hw, cy + bh);
+  ctx.closePath();
+  ctx.fill();
+  // 右侧面装饰线
+  ctx.fillStyle = '#2a0808';
+  ctx.fillRect(cx + hw - 16, cy + 8, 2, bh - 4);
+  ctx.fillRect(cx + hw - 8, cy + 12, 2, bh - 8);
+
+  // ── 左侧面（中间色） ──
+  ctx.fillStyle = '#5a1a1a';
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.lineTo(cx, cy + hh + bh);
+  ctx.lineTo(cx - hw, cy + bh);
+  ctx.closePath();
+  ctx.fill();
+
+  // ── 顶面（最亮） ──
   ctx.fillStyle = P.incBase;
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.fillStyle = P.incLight;
-  ctx.fillRect(bx + 6, by + 6, bw - 12, 16);
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - hh);
+  ctx.lineTo(cx + hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.lineTo(cx - hw, cy);
+  ctx.closePath();
+  ctx.fill();
 
-  ctx.fillStyle = '#660000';
-  ctx.fillRect(bx + 12, by + 22, bw - 24, 10);
-  ctx.fillStyle = P.incLight;
-  ctx.fillRect(bx + 18, by + 24, bw - 36, 5);
+  // ── 顶面边框 ──
+  ctx.strokeStyle = '#7a3030';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - hh);
+  ctx.lineTo(cx + hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.lineTo(cx - hw, cy);
+  ctx.closePath();
+  ctx.stroke();
 
+  // 顶面内部（暗色，玻璃罩将在外部绘制覆盖蛋）
+  ctx.fillStyle = '#4a1515';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - hh + 8);
+  ctx.lineTo(cx + hw - 12, cy);
+  ctx.lineTo(cx, cy + hh - 8);
+  ctx.lineTo(cx - hw + 12, cy);
+  ctx.closePath();
+  ctx.fill();
+  // 顶面已在正面面板显示温度，此处不重复
+
+  // ── 顶面 LED 指示灯 ──
+  let ledColor = '#444';
+  if (g.heatOn && g.power > 0) ledColor = '#FF4500';
+  else if (g.iceOn) ledColor = '#00BFFF';
+  ctx.fillStyle = ledColor;
+  ctx.fillRect(cx - 22, cy - 4, 6, 6);
+  if (ledColor !== '#444') {
+    ctx.fillStyle = ledColor + '66';
+    ctx.fillRect(cx - 26, cy - 8, 14, 14);
+  }
+
+  // ── 前侧温度显示（跟随等距透视） ──
+  const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? '#4FC3F7' : (g.temp >= TEMP_OPT_MIN ? '#4CAF50' : '#FFC107'));
+  ctx.save();
+  // 平移到左侧面起点，应用剪切变换（每右移1px，Y降0.5px，匹配面斜率）
+  ctx.translate(cx - hw + 5, cy + hh - 24);
+  ctx.transform(1, 0.5, 0, 1, 0, 0);
+  // 卡片背景（在变换空间中为矩形，画布上呈现为平行四边形）
+  ctx.fillStyle = '#1a0a0a';
+  ctx.fillRect(0, 0, 52, 18);
+  ctx.fillStyle = '#2a1010';
+  ctx.fillRect(2, 2, 48, 14);
+  ctx.fillStyle = tempColor;
+  ctx.font = '11px monospace';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`🌡${g.temp.toFixed(0)}°C`, 2, 9);
+  ctx.restore();
+  // 温度单位指示条（同样跟随透视）
+  ctx.save();
+  ctx.translate(cx - hw + 7, cy + hh - 2);
+  ctx.transform(1, 0.5, 0, 1, 0, 0);
+  const barW = Math.floor(34 * (g.temp - 20) / 25);
+  ctx.fillStyle = tempColor;
+  ctx.fillRect(0, 0, Math.max(0, Math.min(34, barW)), 3);
+  ctx.restore();
+
+  // ── 加热火焰/冷却冰袋 ──
   if (g.heatOn && g.power > 0) {
-    const t = Date.now() / 150;
-    const flameY = by + bh - 16;
-    ctx.fillStyle = P.flame[0];
-    ctx.fillRect(bx + 60 + Math.sin(t) * 6, flameY - 12, 10, 16);
-    ctx.fillRect(bx + 84 + Math.sin(t * 1.3) * 6, flameY - 16, 10, 22);
-    ctx.fillRect(bx + 108 + Math.sin(t * 0.8) * 6, flameY - 8, 10, 12);
-    ctx.fillStyle = P.flame[2];
-    ctx.fillRect(bx + 66 + Math.sin(t) * 6, flameY - 8, 5, 7);
-    ctx.fillRect(bx + 90 + Math.sin(t * 1.3) * 6, flameY - 12, 5, 10);
-  } else {
-    ctx.fillStyle = '#444';
-    ctx.fillRect(bx + 66, by + bh - 12, 6, 5);
-    ctx.fillRect(bx + 90, by + bh - 14, 6, 7);
+    // 暖色灯光：底座内部发出暖光，层积在蛋下面
+    const t = Date.now() / 800;
+    const glow = 0.4 + Math.sin(t) * 0.2;
+    // 顶面内部暖光（蛋的下层）
+    ctx.fillStyle = `rgba(255, 200, 80, ${glow})`;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - hh + 8);
+    ctx.lineTo(cx + hw - 12, cy);
+    ctx.lineTo(cx, cy + hh - 8);
+    ctx.lineTo(cx - hw + 12, cy);
+    ctx.closePath();
+    ctx.fill();
   }
 
   if (g.iceOn) {
-    const iceX = bx - 56, iceY = by + 10;
+    const ix = cx - hw - 20, iy = cy - 10;
     ctx.fillStyle = '#87CEEB';
-    ctx.fillRect(iceX, iceY, 40, 50);
+    ctx.fillRect(ix, iy, 18, 36);
     ctx.fillStyle = '#ADD8E6';
-    ctx.fillRect(iceX + 3, iceY + 3, 12, 16);
+    ctx.fillRect(ix + 2, iy + 3, 6, 10);
     ctx.fillStyle = '#E0FFFF';
-    ctx.fillRect(iceX + 20, iceY + 20, 10, 10);
-    ctx.fillRect(iceX + 6, iceY + 36, 12, 12);
+    ctx.fillRect(ix + 10, iy + 12, 5, 8);
+    ctx.fillRect(ix + 2, iy + 26, 7, 7);
     ctx.fillStyle = '#fff';
-    ctx.fillRect(iceX + 6, iceY + 6, 6, 6);
-    ctx.fillRect(iceX + 28, iceY + 12, 6, 6);
+    ctx.fillRect(ix + 3, iy + 5, 3, 3);
+    ctx.fillRect(ix + 13, iy + 8, 3, 3);
+    ctx.fillStyle = 'rgba(135, 206, 250, 0.3)';
+    ctx.fillRect(ix - 2, iy - 4, 4, 6);
+    ctx.fillRect(ix + 8, iy - 6, 4, 6);
   }
-
-  drawText('INCUBATOR', bx + 66, by + bh - 16, '#888', 1);
+  ctx.restore();
 }
 
 export function drawIncubatorToCtx(targetCtx) {
-  const bx = 234, by = 290, bw = 252, bh = 100;
+  const cx = 360, cy = 285;
+  const hw = 64, hh = 32, bh = 36;
+  targetCtx.fillStyle = '#3a1010';
+  targetCtx.beginPath();
+  targetCtx.moveTo(cx + hw, cy);
+  targetCtx.lineTo(cx, cy + hh);
+  targetCtx.lineTo(cx, cy + hh + bh);
+  targetCtx.lineTo(cx + hw, cy + bh);
+  targetCtx.closePath();
+  targetCtx.fill();
+  targetCtx.fillStyle = '#5a1a1a';
+  targetCtx.beginPath();
+  targetCtx.moveTo(cx - hw, cy);
+  targetCtx.lineTo(cx, cy + hh);
+  targetCtx.lineTo(cx, cy + hh + bh);
+  targetCtx.lineTo(cx - hw, cy + bh);
+  targetCtx.closePath();
+  targetCtx.fill();
   targetCtx.fillStyle = P.incBase;
-  targetCtx.fillRect(bx, by, bw, bh);
-  targetCtx.fillStyle = P.incLight;
-  targetCtx.fillRect(bx + 6, by + 6, bw - 12, 16);
-  targetCtx.fillStyle = '#660000';
-  targetCtx.fillRect(bx + 12, by + 22, bw - 24, 10);
-  targetCtx.fillStyle = P.incLight;
-  targetCtx.fillRect(bx + 18, by + 24, bw - 36, 5);
-  drawTextToCtx(targetCtx, bx + 66, by + bh - 16, 'INCUBATOR', '#888', 1);
+  targetCtx.beginPath();
+  targetCtx.moveTo(cx, cy - hh);
+  targetCtx.lineTo(cx + hw, cy);
+  targetCtx.lineTo(cx, cy + hh);
+  targetCtx.lineTo(cx - hw, cy);
+  targetCtx.closePath();
+  targetCtx.fill();
+  // 前侧标签已移除
 }
 
 export function drawEgg() {
-  const ex = 360, ey = 230;
+  const ex = 360, ey = 248;
   const eggW = 60, eggH = 82;
 
   if (g.hatchPct >= 100 || g.isHatching) { drawHatchingAnim(); return; }
@@ -107,12 +213,12 @@ export function drawEgg() {
 
   const stage = Math.floor(g.hatchPct / 20);
 
-  // Draw egg body
+  // Draw egg body（优化圆弧：顶部收尖、底部圆润）
   for (let py = -eggH / 2; py < eggH / 2; py++) {
     const prog = py / (eggH / 2);
-    let w = py < 0
-      ? Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85))
-      : Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
+    const factor = py < 0 ? 0.97 : 0.82;
+    const raw = eggW / 2 * Math.sqrt(Math.max(0, 1 - prog * prog * factor));
+    let w = Math.round(raw);
     let col;
     if (py < -eggH / 4) col = '#f8f0e0';
     else if (py < 0) col = '#f5e6c8';
@@ -120,6 +226,13 @@ export function drawEgg() {
     else col = '#e8d098';
     ctx.fillStyle = col;
     ctx.fillRect(ex - w, ey + py, w * 2, 1);
+  }
+  // 顶部圆弧高光
+  ctx.fillStyle = 'rgba(255, 255, 240, 0.15)';
+  for (let py = -eggH / 2; py < -eggH / 4; py++) {
+    const prog = py / (eggH / 2);
+    const w = Math.round(eggW / 2 * Math.sqrt(Math.max(0, 1 - prog * prog * 0.97)));
+    ctx.fillRect(ex - w + 4, ey + py, 2, 1);
   }
 
   // 花纹（蛋壳斑点）
@@ -176,15 +289,10 @@ export function drawEgg() {
     ctx.fillRect(ex, ey, 2, 2);
   }
 
-  drawText(`孵化 ${Math.floor(g.hatchPct)}%`, ex - 50, ey + eggH / 2 + 35, P.dim, 1.5);
-  ctx.fillStyle = P.barBg;
-  ctx.fillRect(ex - 40, ey + eggH / 2 + 52, 80, 6);
-  ctx.fillStyle = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
-  ctx.fillRect(ex - 40, ey + eggH / 2 + 52, Math.floor(80 * g.hatchPct / 100), 6);
 }
 
 export function drawEggToCtx(targetCtx) {
-  const ex = 360, ey = 230;
+  const ex = 360, ey = 248;
   const eggW = 60, eggH = 82;
   if (g.dayCount < g.nextHatchDay) {
     const daysLeft = g.nextHatchDay - g.dayCount;
@@ -195,7 +303,8 @@ export function drawEggToCtx(targetCtx) {
   const stage = Math.floor(g.hatchPct / 20);
   for (let py = -eggH / 2; py < eggH / 2; py++) {
     const prog = py / (eggH / 2);
-    let w = py < 0 ? Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.85)) : Math.floor(eggW / 2 * Math.sqrt(1 - prog * prog * 0.95));
+    const factor = py < 0 ? 0.97 : 0.82;
+    const w = Math.round(eggW / 2 * Math.sqrt(Math.max(0, 1 - prog * prog * factor)));
     targetCtx.fillStyle = '#f5e6c8';
     targetCtx.fillRect(ex - w, ey + py, w * 2, 1);
   }
@@ -230,11 +339,6 @@ export function drawEggToCtx(targetCtx) {
     targetCtx.fillStyle = P.eggInt;
     targetCtx.fillRect(ex - 14, ey - 10, 28, 32);
   }
-  targetCtx.fillStyle = P.barBg;
-  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 52, 80, 6);
-  targetCtx.fillStyle = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
-  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 52, Math.floor(80 * g.hatchPct / 100), 6);
-  drawTextToCtx(targetCtx, ex - 50, ey + eggH / 2 + 35, `孵化 ${Math.floor(g.hatchPct)}%`, P.dim, 1.5);
   // daysLeft 已在上方等待分支处理，此路径不会走到
 }
 
@@ -286,4 +390,127 @@ export function drawHatchingAnim() {
     ctx.fillRect(cx - 16, cy - 8, 4, 4);
     ctx.fillRect(cx + 10, cy - 8, 4, 4);
   }
+}
+
+export function drawGlassDome() {
+  // 透明方形玻璃罩，层积：底座→蛋→玻璃罩（最上层）
+  const cx = 360, cy = 285;     // 底座菱形中心
+  const hw = 64, hh = 32;       // 底座半宽/半高
+  const cy2 = 208;              // 顶面菱形中心 Y（抬升高度）
+  const hw2 = 56, hh2 = 28;     // 顶面半宽/半高（略小于底座，透视效果）
+
+  ctx.save();
+
+  // 渐变：顶部稍深、底部渐透
+  const gradR = ctx.createLinearGradient(cx, cy2 - hh2, cx, cy + hh);
+  gradR.addColorStop(0, 'rgba(180, 220, 255, 0.12)');
+  gradR.addColorStop(0.5, 'rgba(180, 220, 255, 0.06)');
+  gradR.addColorStop(1, 'rgba(200, 230, 255, 0.02)');
+
+  const gradL = ctx.createLinearGradient(cx, cy2 - hh2, cx, cy + hh);
+  gradL.addColorStop(0, 'rgba(180, 220, 255, 0.10)');
+  gradL.addColorStop(0.5, 'rgba(180, 220, 255, 0.05)');
+  gradL.addColorStop(1, 'rgba(200, 230, 255, 0.02)');
+
+  // 右侧面
+  ctx.fillStyle = gradR;
+  ctx.strokeStyle = 'rgba(180, 220, 255, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy);       // 底座右点
+  ctx.lineTo(cx, cy + hh);       // 底座下点
+  ctx.lineTo(cx, cy2 + hh2);     // 顶面下点
+  ctx.lineTo(cx + hw2, cy2);     // 顶面右点
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 左侧面
+  ctx.fillStyle = gradL;
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, cy);       // 底座左点
+  ctx.lineTo(cx, cy + hh);       // 底座下点
+  ctx.lineTo(cx, cy2 + hh2);     // 顶面下点
+  ctx.lineTo(cx - hw2, cy2);     // 顶面左点
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 顶面
+  const gradT = ctx.createLinearGradient(cx, cy2 - hh2, cx, cy2 + hh2);
+  gradT.addColorStop(0, 'rgba(180, 220, 255, 0.15)');
+  gradT.addColorStop(0.5, 'rgba(180, 220, 255, 0.05)');
+  gradT.addColorStop(1, 'rgba(180, 220, 255, 0.10)');
+  ctx.fillStyle = gradT;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy2 - hh2);
+  ctx.lineTo(cx + hw2, cy2);
+  ctx.lineTo(cx, cy2 + hh2);
+  ctx.lineTo(cx - hw2, cy2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // ── 顶面黑色方框边框 ──
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy2 - hh2 + 3);
+  ctx.lineTo(cx + hw2 - 3, cy2);
+  ctx.lineTo(cx, cy2 + hh2 - 3);
+  ctx.lineTo(cx - hw2 + 3, cy2);
+  ctx.closePath();
+  ctx.stroke();
+
+  // ── 棱边加强（立体感） ──
+  ctx.strokeStyle = 'rgba(200, 230, 255, 0.25)';
+  ctx.lineWidth = 1;
+  // 前中竖棱
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + hh);
+  ctx.lineTo(cx, cy2 + hh2);
+  ctx.stroke();
+  // 左前竖棱
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, cy);
+  ctx.lineTo(cx - hw2, cy2);
+  ctx.stroke();
+  // 右前竖棱
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy);
+  ctx.lineTo(cx + hw2, cy2);
+  ctx.stroke();
+  // 背面竖棱（上部清晰，越往下越淡，像消失在背景中）
+  const backGrad = ctx.createLinearGradient(cx, cy2 - hh2, cx, cy2 - hh2 + 55);
+  backGrad.addColorStop(0, 'rgba(180, 220, 255, 0.14)');
+  backGrad.addColorStop(0.5, 'rgba(180, 220, 255, 0.06)');
+  backGrad.addColorStop(1, 'rgba(180, 220, 255, 0)');
+  ctx.strokeStyle = backGrad;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy2 - hh2 + 55);
+  ctx.lineTo(cx, cy2 - hh2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(200, 230, 255, 0.25)';
+  // 左上斜棱（顶面左前棱）
+  ctx.beginPath();
+  ctx.moveTo(cx - hw2, cy2);
+  ctx.lineTo(cx, cy2 + hh2);
+  ctx.stroke();
+  // 右上斜棱（顶面右前棱）
+  ctx.beginPath();
+  ctx.moveTo(cx + hw2, cy2);
+  ctx.lineTo(cx, cy2 + hh2);
+  ctx.stroke();
+  // 底座左前棱
+  ctx.beginPath();
+  ctx.moveTo(cx - hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.stroke();
+  // 底座右前棱
+  ctx.beginPath();
+  ctx.moveTo(cx + hw, cy);
+  ctx.lineTo(cx, cy + hh);
+  ctx.stroke();
+
+  ctx.restore();
 }

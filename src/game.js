@@ -11,7 +11,7 @@ import {
 import { initAudio, playSound, soundSynth } from './audio.js';
 import { drawText, drawTextToCtx } from './utils.js';
 import { drawIsoGround, isoToScreen, drawSunMoonToCtx } from './render/ground.js';
-import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim, drawHatchingAnimToCtx } from './render/egg.js';
+import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim, drawHatchingAnimToCtx, drawGlassDome } from './render/egg.js';
 import { drawPetSprite } from './render/pet_sprite.js';
 
 const LOG_W = 720;
@@ -55,17 +55,6 @@ function getPetSpriteCanvas(pet) {
   drawPetSprite(cvs, pet, 0);
   petSpriteCache.set(cacheKey, { canvas: cvs, timestamp: Date.now() });
   return cvs;
-}
-
-function drawSunMoon() {
-  // Simplified - just draw a static sun icon
-  const sx = 640 + CONTENT_OFFSET, sy = 60;
-  ctx.fillStyle = 'rgba(255,200,80,0.15)';
-  ctx.fillRect(sx - 40, sy - 40, 80, 80);
-  ctx.fillStyle = '#FFD700';
-  ctx.fillRect(sx - 24, sy - 24, 48, 48);
-  ctx.fillStyle = '#FFFACD';
-  ctx.fillRect(sx - 18, sy - 18, 36, 36);
 }
 
 // ─── 绘制宠物 ───
@@ -174,6 +163,7 @@ function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
   const scale = 1.33;
   const isDragging = options.isDragging || false;
   const moodBubble = options.moodBubble || { show: false };
+  const showExpBar = options.showExpBar || false;
 
   // Dynamic shadow
   if (!isDragging) {
@@ -206,13 +196,16 @@ function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
   const extra = geneStr ? ` ${geneStr}` : '';
   drawTextToCtx(targetCtx, basePx - 25, basePy - 70, `${pet.star}★ Lv${pet.level}${extra}`, '#aaa', 0.5);
 
-  const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
-  const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
-  const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
-  targetCtx.fillStyle = P.barBg;
-  targetCtx.fillRect(basePx - 25, basePy - 56, 50, 4);
-  targetCtx.fillStyle = '#90EE90';
-  targetCtx.fillRect(basePx - 25, basePy - 56, Math.floor(50 * expProg), 4);
+  // 经验条（仅在鼠标悬停时显示）
+  if (showExpBar) {
+    const expNext = EXP_TABLE[pet.level] || EXP_TABLE[10];
+    const expCur = pet.level > 1 ? EXP_TABLE[pet.level - 1] : 0;
+    const expProg = Math.max(0, Math.min(1, (pet.exp - expCur) / (expNext - expCur)));
+    targetCtx.fillStyle = P.barBg;
+    targetCtx.fillRect(basePx - 25, basePy - 56, 50, 4);
+    targetCtx.fillStyle = '#90EE90';
+    targetCtx.fillRect(basePx - 25, basePy - 56, Math.floor(50 * expProg), 4);
+  }
 }
 
 // ─── 食物绘制 ───
@@ -255,78 +248,128 @@ function drawIcn(text, x, y, color, scale = 1.3) {
 }
 
 function drawHUD() {
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
-  ctx.fillRect(0, 0, LOG_W, 80);
-  const Y1 = 6, Y2 = 42;
+  const Y = 10;
+  const H = Y + Math.floor(18 * 1.1) + 6;
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  ctx.fillRect(0, 0, LOG_W, H);
+  
+  const isIncubator = g.currentScene === 'incubator';
+  const GAP = 10;
+  const FS = Math.floor(18 * 1.1);
 
-  // ── 列对齐常量（两行共享） ──
-  const C_TIME = 8;     // 时间 / 📅天
-  const C_ICON = 84;    // 🥚 / 🍖
-  const C_BAR  = 106;   // 进度条（宽 70，紧贴 🥚 之后）
-  const C_PCT  = 180;   // % / 数字（紧贴进度条之后）
-  const C_TEMP = 265;   // 🌡温度（与 G2 组大间距～60px）
-  const C_POW  = 345;   // ⚡电量（与 🌡 间距～35px）
-  const C_PETS = 415;   // 🐾宠物数（与 ⚡ 间距～30px）
-  const C_HEAT = 615;   // 孵化状态（靠右）
+  ctx.save();
+  ctx.font = `${FS}px "Microsoft YaHei","PingFang SC","Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.textBaseline = 'top';
 
-  // ── 第一行 ──
+  let cx = 8;
+
+  // 📅 天数（两场景）
+  const dayStr = `📅${g.dayCount}天`;
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(dayStr, cx, Y);
+  cx += Math.ceil(ctx.measureText(dayStr).width) + GAP;
+
+  // ☀/🌙 时间（两场景）
   const timeIcon = g.isDay ? '☀' : '🌙';
   const rem = g.isDay ? DAY_SEC - g.time : NGT_SEC - (g.time - DAY_SEC);
-  drawIcn(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, C_TIME, Y1, P.txt, 1.1);
+  const timeStr = `${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`;
+  ctx.fillStyle = P.txt;
+  ctx.fillText(timeStr, cx, Y);
+  cx += Math.ceil(ctx.measureText(timeStr).width) + GAP;
 
-  // 进度条颜色：按温度而非加热器开关
-  let hatchBarClr = '#666';
-  if (g.temp > TEMP_OPT_MAX) hatchBarClr = P.danger;
-  else if (g.temp >= TEMP_OPT_MIN) hatchBarClr = '#4CAF50';
-  else if (g.temp >= 30) hatchBarClr = '#FFC107';
-  drawIcn('🥚', C_ICON, Y1, '#aaa', 1.1);
-  ctx.fillStyle = P.barBg;
-  ctx.fillRect(C_BAR, Y1 + 4, 70, 8);
-  ctx.fillStyle = hatchBarClr;
-  ctx.fillRect(C_BAR, Y1 + 4, Math.floor(70 * g.hatchPct / 100), 8);
-  drawIcn(`${Math.floor(g.hatchPct)}%`, C_PCT, Y1, hatchBarClr, 1.0);
+  if (isIncubator) {
+    // 🥚 进度条 + %
+    let hatchBarClr = '#666';
+    if (g.temp > TEMP_OPT_MAX) hatchBarClr = P.danger;
+    else if (g.temp >= TEMP_OPT_MIN) hatchBarClr = '#4CAF50';
+    else if (g.temp >= 30) hatchBarClr = '#FFC107';
 
-  const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
-  const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
-  drawIcn(`🌡${g.temp.toFixed(0)}°`, C_TEMP, Y1, tempColor, 1.1);
-
-  const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
-  drawIcn(`⚡${Math.floor(g.power)}`, C_POW, Y1, pColor, 1.1);
-
-  drawIcn(`🐾${g.pets.length}`, C_PETS, Y1, '#aaa', 1.1);
-
-  // 孵化状态取决于温度，不绑加热器开关
-  let statusText = '', statusClr = P.dim;
-  if (g.iceOn) {
-    statusText = '🧊冷却'; statusClr = '#00BFFF';
-  } else if (g.temp > TEMP_OPT_MAX) {
-    statusText = '🔥过热!'; statusClr = P.danger;
-  } else if (g.temp >= TEMP_OPT_MIN) {
-    statusText = '🔥孵化中'; statusClr = '#4CAF50';
-  } else if (g.temp >= 30) {
-    statusText = g.heatOn ? '🔥升温中' : '🌡余温';
-    statusClr = '#FFC107';
-  } else {
-    statusText = '⏸暂停'; statusClr = P.dim;
-  }
-  // 加热器没电了优先显示
-  if (g.heatOn && g.power <= 0) {
-    statusText = '🔥无电'; statusClr = P.dim;
-  }
-  drawIcn(statusText, C_HEAT, Y1, statusClr, 1.1);
-
-  // ── 第二行（与第一行列对齐） ──
-  drawIcn(`📅${g.dayCount}天`, C_TIME, Y2, '#aaa', 1.1);
-
-  if (g.currentPet) {
-    const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
-    drawIcn('🍖', C_ICON, Y2, '#aaa', 1.1);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('🥚', cx, Y);
+    const barX = cx + Math.ceil(ctx.measureText('🥚').width) + 4;
     ctx.fillStyle = P.barBg;
-    ctx.fillRect(C_BAR, Y2 + 4, 70, 8);
-    ctx.fillStyle = hungerColor;
-    ctx.fillRect(C_BAR, Y2 + 4, Math.floor(70 * g.hunger / 100), 8);
-    drawIcn(`${Math.floor(g.hunger)}`, C_PCT, Y2, hungerColor, 1.0);
+    ctx.fillRect(barX, Y + 4, 70, 8);
+    ctx.fillStyle = hatchBarClr;
+    ctx.fillRect(barX, Y + 4, Math.floor(70 * g.hatchPct / 100), 8);
+    cx = barX + 70 + GAP;
+
+    const pctStr = `${Math.floor(g.hatchPct)}%`;
+    ctx.fillStyle = hatchBarClr;
+    ctx.fillText(pctStr, cx, Y);
+    cx += Math.ceil(ctx.measureText(pctStr).width) + GAP;
+
+    // 🌡
+    const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
+    const tempClr = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
+    const tempStr = `🌡${g.temp.toFixed(0)}°`;
+    ctx.fillStyle = tempClr;
+    ctx.fillText(tempStr, cx, Y);
+    cx += Math.ceil(ctx.measureText(tempStr).width) + GAP;
+
+    // ⚡
+    const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
+    const powStr = `⚡${Math.floor(g.power)}`;
+    ctx.fillStyle = pColor;
+    ctx.fillText(powStr, cx, Y);
+    cx += Math.ceil(ctx.measureText(powStr).width) + GAP;
   }
+
+  // 🐾 宠物数（两场景）
+  const petsStr = `🐾${g.pets.length}`;
+  ctx.fillStyle = '#aaa';
+  ctx.fillText(petsStr, cx, Y);
+  cx += Math.ceil(ctx.measureText(petsStr).width) + GAP;
+
+  if (isIncubator) {
+    // 孵化状态（右上角）
+    let statusText = '', statusClr = P.dim;
+    if (g.iceOn) { statusText = '🧊冷却中'; statusClr = '#00BFFF'; }
+    else if (g.temp > TEMP_OPT_MAX) { statusText = '🔥过热！'; statusClr = P.danger; }
+    else if (g.temp >= TEMP_OPT_MIN) { statusText = '🔥孵化中'; statusClr = '#4CAF50'; }
+    else if (g.temp >= 30) { statusText = g.heatOn ? '🔥升温中' : '🌡余温'; statusClr = '#FFC107'; }
+    else { statusText = '⏸暂停'; statusClr = P.dim; }
+    if (g.heatOn && g.power <= 0) { statusText = '⚡无电'; statusClr = P.dim; }
+    ctx.fillStyle = statusClr;
+    ctx.fillText(statusText, cx, Y);
+    cx += Math.ceil(ctx.measureText(statusText).width) + GAP;
+  }
+
+  if (!isIncubator && g.currentPet) {
+    // 🍖 饥饿度
+    const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('🍖', cx, Y);
+    const hBarX = cx + Math.ceil(ctx.measureText('🍖').width) + 4;
+    ctx.fillStyle = P.barBg;
+    ctx.fillRect(hBarX, Y + 4, 70, 8);
+    ctx.fillStyle = hungerColor;
+    ctx.fillRect(hBarX, Y + 4, Math.floor(70 * g.hunger / 100), 8);
+    cx = hBarX + 70 + GAP;
+
+    const hungerStr = `${Math.floor(g.hunger)}`;
+    ctx.fillStyle = hungerColor;
+    ctx.fillText(hungerStr, cx, Y);
+  }
+
+  ctx.restore();
+}
+
+function drawIncubatorStatus() {
+  ctx.save();
+  let statusText = '', statusClr = P.dim;
+  if (g.iceOn) { statusText = '🧊冷却中'; statusClr = '#00BFFF'; }
+  else if (g.temp > TEMP_OPT_MAX) { statusText = '🔥 过热！'; statusClr = P.danger; }
+  else if (g.temp >= TEMP_OPT_MIN) { statusText = '🔥 孵化中'; statusClr = '#4CAF50'; }
+  else if (g.temp >= 30) { statusText = g.heatOn ? '🔥 升温中' : '🌡 余温'; statusClr = '#FFC107'; }
+  else { statusText = '⏸ 暂停'; statusClr = P.dim; }
+  if (g.heatOn && g.power <= 0) { statusText = '⚡ 无电'; statusClr = P.dim; }
+
+  ctx.font = '20px "Microsoft YaHei","PingFang SC","Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = statusClr;
+  ctx.fillText(statusText, 400, 260);
+  ctx.restore();
 }
 
 function drawFeedInventory() {
@@ -418,33 +461,47 @@ function doSynthesize() {
     if (!starGroups[p.star]) starGroups[p.star] = [];
     starGroups[p.star].push(i);
   });
-  const starHint = Object.entries(starGroups)
-    .filter(([_, arr]) => arr.length >= 3)
-    .map(([s]) => `${s}星×${starGroups[s].length}`).join(' ') || '无可用组合';
-
-  const listHtml = g.pets.map((p, i) => {
-    const starStr = '★'.repeat(p.star || 1) + '☆'.repeat(5 - (p.star || 1));
-    const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('') || '无';
-    const petTypeIdx = getPetType(p);
-    return `<div class="breed-pet-item" id="breed_item_${i}" onclick="toggleSynthSelect(${i})" style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid #333;cursor:pointer">
-      <canvas id="breed_canvas_${i}" width="48" height="48" style="image-rendering:pixelated"></canvas>
-      <div>
-        <div style="color:${STAR_COLORS[p.star]}">${PET_EMOJI[petTypeIdx]||'🐾'} ${p.name} ${starStr}</div>
-        <div style="color:#aaa;font-size:11px">${PET_TYPE_NAMES[petTypeIdx]||''} · F${p.generation} · ${geneStr} · Lv.${p.level}</div>
-      </div>
-      <div id="breed_check_${i}" style="margin-left:auto;color:#444;font-size:20px">○</div>
+  // 按星级分组渲染
+  const sortedStars = Object.keys(starGroups).map(Number).sort((a, b) => b - a);
+  let listHtml = '';
+  sortedStars.forEach(star => {
+    const indices = starGroups[star];
+    const canSynth = indices.length >= 3;
+    const starColor = STAR_COLORS[star] || '#888';
+    listHtml += `<div style="display:flex;align-items:center;gap:4px;padding:5px 4px 2px;margin-top:4px;border-bottom:1px solid ${canSynth ? '#444' : '#2a2a2a'}">
+      <span style="color:${starColor};font-size:12px">${'★'.repeat(star)}${'☆'.repeat(5-star)}</span>
+      <span style="color:#aaa;font-size:11px">${star}星组</span>
+      <span style="color:#666;font-size:10px;margin-left:auto">${indices.length}只${canSynth ? ' · 可合成' : ''}</span>
     </div>`;
-  }).join('');
 
-  msg.innerHTML = `<div class="title">⚗️ 宠物合成</div>
-    <div style="color:#aaa;font-size:12px;margin-bottom:4px">选择3只<b style="color:#FFD700">同星级</b>宠物合成1只<b style="color:#FFD700">+1星</b>宠物</div>
-    <div style="color:#666;font-size:11px;margin-bottom:8px">可选：${starHint} &nbsp; <span style="color:#f55">副宠物将被消耗</span></div>
-    <div id="breed_list" style="max-height:60vh;overflow-y:auto">${listHtml}</div>
-    <div id="breed_error" style="color:#f55;font-size:12px;margin-top:6px;display:none">请选择3只同星级的宠物</div>
-    <div style="display:flex;gap:8px;margin-top:10px">
-      <button onclick="confirmSynth()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">合成</button>
-      <button onclick="autoSynth()" style="flex:1;padding:8px;background:#2a1a1a;border:2px solid #f55;color:#f88;cursor:pointer">自动合成</button>
-      <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">取消</button>
+    indices.forEach(i => {
+      const p = g.pets[i];
+      const geneStr = (p.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('') || '';
+      const petTypeIdx = getPetType(p);
+      const daysLeft = p.expireDay - g.dayCount;
+      const daysStr = daysLeft <= 3
+        ? `<span style="color:#f55;font-size:10px">⚠${daysLeft}天</span>`
+        : `<span style="color:#666;font-size:10px">${daysLeft}天</span>`;
+      listHtml += `<div class="breed-pet-item" id="breed_item_${i}" onclick="toggleSynthSelect(${i})" style="display:flex;align-items:center;gap:6px;padding:5px 4px;border-bottom:1px solid #2a2a2a;cursor:pointer;transition:background 0.12s">
+        <canvas id="breed_canvas_${i}" width="40" height="40" style="image-rendering:pixelated;flex-shrink:0"></canvas>
+        <div style="flex:1;min-width:0;line-height:1.3">
+          <div style="color:${STAR_COLORS[p.star]};font-size:12px">${PET_EMOJI[petTypeIdx]||'🐾'} ${p.name}</div>
+          <div style="color:#888;font-size:10px">Lv.${p.level} · F${p.generation}${geneStr ? ' · ' + geneStr : ''} · ${daysStr}</div>
+        </div>
+        <button onclick="event.stopPropagation();showPetDetail(${i})" style="background:none;border:1px solid #555;border-radius:3px;color:#aaa;cursor:pointer;padding:1px 5px;font-size:11px" title="查看详情">📋</button>
+        <div id="breed_check_${i}" style="color:#444;font-size:16px;width:18px;text-align:center;flex-shrink:0">○</div>
+      </div>`;
+    });
+  });
+
+  msg.innerHTML = `<div class="title">🐾 宠物管理</div>
+    <div style="max-height:55vh;overflow-y:auto">${listHtml}</div>
+    <div id="breed_hint" style="color:#666;font-size:11px;margin:6px 0;text-align:center">已选 0/3 只 · 点选3只同星宠物合成</div>
+    <div id="breed_error" style="color:#f55;font-size:12px;margin-bottom:6px;display:none;text-align:center">请选择3只同星级的宠物</div>
+    <div style="display:flex;gap:8px">
+      <button id="synth_btn" onclick="confirmSynth()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#666;cursor:pointer;opacity:0.5">⚗️ 合成</button>
+      <button onclick="autoSynth()" style="flex:1;padding:8px;background:#2a1a1a;border:2px solid #f55;color:#f88;cursor:pointer">🤖 自动合成</button>
+      <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">✕ 关闭</button>
     </div>`;
   overlay.classList.add('show');
   g.pets.forEach((p, i) => {
@@ -460,12 +517,40 @@ window.toggleSynthSelect = function(idx) {
   const alreadyIdx = synthSelect.indexOf(idx);
   if (alreadyIdx >= 0) synthSelect.splice(alreadyIdx, 1);
   else if (synthSelect.length < 3) synthSelect.push(idx);
+
+  // 更新每个宠物的勾选状态
   g.pets.forEach((_, i) => {
     const el = document.getElementById(`breed_check_${i}`);
     const item = document.getElementById(`breed_item_${i}`);
     if (el) el.textContent = synthSelect.includes(i) ? '◉' : '○';
-    if (item) item.style.background = synthSelect.includes(i) ? '#2a2a4a' : 'transparent';
+    if (el) el.style.color = synthSelect.includes(i) ? STAR_COLORS[g.pets[i].star] || '#FFD700' : '#444';
+    if (item) item.style.background = synthSelect.includes(i) ? 'rgba(255,215,0,0.08)' : 'transparent';
   });
+
+  // 更新底部提示
+  const hint = document.getElementById('breed_hint');
+  if (hint) {
+    hint.textContent = synthSelect.length === 3
+      ? '已选 3/3 只 · 可以合成了！'
+      : `已选 ${synthSelect.length}/3 只 · 点选3只同星宠物合成`;
+  }
+
+  // 合成按钮状态
+  const sBtn = document.getElementById('synth_btn');
+  if (sBtn) {
+    if (synthSelect.length === 3) {
+      const [a, b, c] = synthSelect;
+      const sameStar = g.pets[a].star === g.pets[b].star && g.pets[b].star === g.pets[c].star;
+      if (sameStar) {
+        sBtn.style.background = '#1a4a1a'; sBtn.style.border = '2px solid #4CAF50'; sBtn.style.color = '#fff'; sBtn.style.opacity = '1';
+      } else {
+        sBtn.style.background = '#222'; sBtn.style.border = '2px solid #555'; sBtn.style.color = '#666'; sBtn.style.opacity = '0.5';
+      }
+    } else {
+      sBtn.style.background = '#222'; sBtn.style.border = '2px solid #555'; sBtn.style.color = '#666'; sBtn.style.opacity = '0.5';
+    }
+  }
+
   document.getElementById('breed_error').style.display = 'none';
 };
 
@@ -648,8 +733,9 @@ function showPetDetail(idx) {
     <div style="margin-top:6px;font-size:11px;color:#666">剩余 <span style="color:${daysLeft <= 3 ? '#f55' : '#aaa'}">${daysLeft}天</span> · 已繁殖${pet.breedCount}次</div>
     ${pet.father ? `<div style="font-size:11px;color:#666;margin-top:2px">父:${pet.father} 母:${pet.mother}</div>` : ''}
     <div style="display:flex;gap:8px;margin-top:10px">
-      <button onclick="setCurrentPet(${idx})" style="flex:1;padding:8px;background:#1a2a1a;border:2px solid #5f5;color:#8f8;cursor:pointer">选中</button>
+      <button onclick="doSynthesize()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">← 返回列表</button>
       <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">关闭</button>
+      <button onclick="confirmBanishPet(${idx})" style="flex:1;padding:8px;background:#2a1a1a;border:2px solid #f55;color:#faa;cursor:pointer">👋 放逐</button>
     </div>`;
   overlay.classList.add('show');
   setTimeout(() => {
@@ -658,6 +744,7 @@ function showPetDetail(idx) {
   }, 50);
 }
 window.showAlbum = showAlbum;
+window.showPetDetail = showPetDetail;
 
 window.setCurrentPet = function(idx) {
   g.currentPet = g.pets[idx];
@@ -671,11 +758,12 @@ window.closeOverlay = function() {
 
 // ─── 场景切换 ───
 window.doSceneSwitch = function(targetScene) {
-  if (g.sceneTransition.active) return;
   if (targetScene === 'pets' && g.pets.length === 0) { showToast('还没有宠物'); return; }
   initAudio();
   playSound('sceneSwitch');
-  g.sceneTransition = { active: true, progress: 0, from: g.currentScene, to: targetScene };
+  g.currentScene = targetScene;
+  updateBtnUI();
+  saveGame();
 };
 
 // 场景切换封装（供 HTML onclick 使用，避免暴露 g）
@@ -749,7 +837,7 @@ function seekFood(pet) {
 
 function updatePetWander(dt) {
   g.pets.forEach(pet => {
-    if (!pet.scenePos || g.draggingPetId === pet.id || g.hoveredPetId === pet.id) return;
+    if (!pet.scenePos || g.draggingPetId === pet.id || g.hoveredPetId === pet) return;
     if (pet.interactAnim && pet.interactAnim.time > 0) return;
 
     // Lazy-init physics fields
@@ -769,7 +857,7 @@ function updatePetWander(dt) {
     pet.wanderTimer -= dt;
     if (pet.wanderTimer <= 0) {
       if (Math.random() < 0.6) {
-        pet.wanderTarget = { x: 80 + Math.random() * 560, y: 310 + Math.random() * 180 };
+        pet.wanderTarget = { x: 80 + Math.random() * 560, y: 120 + Math.random() * 400 };
         pet.wanderSpeed = 0.4 + Math.random() * 0.8;
         pet.wanderIdle = 0;
         pet._vx = 0;
@@ -827,7 +915,7 @@ function updatePetWander(dt) {
       }
 
       pet.scenePos.x = Math.max(50, Math.min(670, pet.scenePos.x));
-      pet.scenePos.y = Math.max(290, Math.min(500, pet.scenePos.y));
+      pet.scenePos.y = Math.max(120, Math.min(520, pet.scenePos.y));
 
       // Sync facing direction with velocity
       if (pet._vx < -0.1) pet.facingRight = false;
@@ -1173,59 +1261,9 @@ function loop() {
     return;
   }
 
-  // Transition
-  if (g.sceneTransition.active) {
-    g.sceneTransition.progress += dt / 0.3;
-    if (g.sceneTransition.progress >= 1) {
-      g.sceneTransition.progress = 1;
-      g.sceneTransition.active = false;
-      g.currentScene = g.sceneTransition.to;
-      saveGame();
-    }
-  }
-
   ctx.clearRect(0, 0, LOG_W, LOG_H);
 
-  // Scene transition rendering
-  if (g.sceneTransition.active) {
-    console.log('[transition] rendering, progress:', g.sceneTransition.progress.toFixed(2), 'from:', g.sceneTransition.from, 'to:', g.sceneTransition.to);
-    initTransCanvases();
-    const p = g.sceneTransition.progress;
-    const ease = 1 - Math.pow(1 - p, 3);
-    const toPets = g.sceneTransition.to === 'pets';
-    const oldOffset = Math.round((toPets ? ease : -ease) * LOG_W);
-    const newOffset = Math.round((toPets ? (1 - ease) : -(1 - ease)) * LOG_W);
-
-    // Render old scene
-    drawIsoGroundToCtx(transOldCtx);
-    drawSunMoonToCtx(transOldCtx);
-    if (g.sceneTransition.from === 'incubator') {
-      drawIncubatorToCtx(transOldCtx);
-      if (g.isHatching) drawHatchingAnimToCtx(transOldCtx);
-      else drawEggToCtx(transOldCtx);
-    } else {
-      const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
-      sortedPets.forEach(pet => {
-        if (pet.scenePos) drawPetToCtx(transOldCtx, pet, pet.scenePos.x, pet.scenePos.y - TILE_H / 2, {});
-      });
-    }
-    ctx.drawImage(transOldCanvas, oldOffset, 0);
-
-    // Render new scene
-    drawIsoGroundToCtx(transNewCtx);
-    drawSunMoonToCtx(transNewCtx);
-    if (g.sceneTransition.to === 'incubator') {
-      drawIncubatorToCtx(transNewCtx);
-      if (g.isHatching) drawHatchingAnimToCtx(transNewCtx);
-      else drawEggToCtx(transNewCtx);
-    } else {
-      const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
-      sortedPets.forEach(pet => {
-        if (pet.scenePos) drawPetToCtx(transNewCtx, pet, pet.scenePos.x, pet.scenePos.y - TILE_H / 2, {});
-      });
-    }
-    ctx.drawImage(transNewCanvas, newOffset, 0);
-  } else if (g.interactGame === 'battle' && battleState) {
+  if (g.interactGame === 'battle' && battleState) {
     drawBattle(ctx);
   } else if (g.interactGame === 'ball' && ballGame) {
     drawBallGame(ctx);
@@ -1240,6 +1278,7 @@ function loop() {
       drawIncubator();
       if (g.isHatching) drawHatchingAnim();
       else drawEgg();
+      drawGlassDome();
     } else {
       if (g.pets.length > 0) {
         g.heartParticles.forEach(p => {
@@ -1251,15 +1290,17 @@ function loop() {
           ctx.fillRect(hx, hy, hs/2, hs/2);
         });
         const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
+        const hoveredPet = g.hoveredPetId;
         sortedPets.forEach(pet => {
           if (pet.scenePos) {
             const feetY = pet.scenePos.y - TILE_H / 2;
+            const isHovered = pet === hoveredPet;
             drawPet(pet, pet.scenePos.x, feetY, {
               isDragging: g.draggingPetId === pet.id,
               clickReaction: pet.clickReaction || null,
               petMood: pet.petMood || 'normal',
               moodBubble: pet.moodBubble || { show: false },
-              showExpBar: g.hoveredPetId === pet.id,
+              showExpBar: isHovered,
             });
           }
         });
@@ -1375,7 +1416,7 @@ function setupInput(canvasEl) {
           g.intimacy = Math.min(100, g.intimacy + 3);
           const reactions = ['jump', 'heart', 'spin', 'bounce'];
           pet.clickReaction = { type: reactions[Math.floor(Math.random() * reactions.length)], time: 0 };
-          for (let i = 0; i < 5; i++) g.heartParticles.push({
+          for (let j = 0; j < 5; j++) g.heartParticles.push({
             x: pet.scenePos.x + (Math.random()-0.5)*40, y: (pet.scenePos.y - TILE_H/2) - 20 + (Math.random()-0.5)*40,
             vx: (Math.random()-0.5)*2, vy: -Math.random()*2-1, life: 1, size: 4+Math.random()*4
           });
@@ -1391,7 +1432,7 @@ function setupInput(canvasEl) {
     // Food drop on empty ground (pets scene only)
     if (g.currentScene === 'pets' && g.pets.length > 0 && !g.sceneTransition.active && g.foodDropCd <= 0) {
       const types = ['worm', 'worm', 'worm', 'fruit', 'treat'];
-      const targetY = Math.max(300, Math.min(500, my));
+      const targetY = Math.max(120, Math.min(520, my));
       g.droppedFood.push({
         x: Math.max(80, Math.min(640, mx)), y: targetY,
         type: types[Math.floor(Math.random()*types.length)],
@@ -1456,7 +1497,7 @@ function setupInput(canvasEl) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && pet.scenePos) {
         pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
-        pet.scenePos.y = Math.max(290, Math.min(500, y - g.dragOffsetY));
+        pet.scenePos.y = Math.max(120, Math.min(520, y - g.dragOffsetY));
         g.dragMoved = true;
       }
       return;
@@ -1468,7 +1509,7 @@ function setupInput(canvasEl) {
       for (const pet of g.pets) {
         if (!pet.scenePos) continue;
         const dx = x - pet.scenePos.x, dy = y - (pet.scenePos.y - TILE_H/2);
-        if (dx*dx + dy*dy <= 70*70) { isOverPet = true; g.hoveredPetId = pet.id; break; }
+        if (dx*dx + dy*dy <= 70*70) { isOverPet = true; g.hoveredPetId = pet; break; }
       }
       if (isOverPet) canvasEl.style.cursor = 'grab';
       else if (g.currentScene === 'pets' && g.pets.length > 0) canvasEl.style.cursor = g.foodDropCd > 0 ? 'not-allowed' : 'crosshair';
@@ -1555,7 +1596,7 @@ function setupInput(canvasEl) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && pet.scenePos) {
         pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
-        pet.scenePos.y = Math.max(290, Math.min(500, y - g.dragOffsetY));
+        pet.scenePos.y = Math.max(120, Math.min(520, y - g.dragOffsetY));
         g.dragMoved = true;
       }
     }
@@ -1605,7 +1646,7 @@ function setupInput(canvasEl) {
       // Trigger click logic
       if (g.currentScene === 'pets' && g.pets.length > 0 && !g.sceneTransition.active && g.foodDropCd <= 0) {
         const types = ['worm', 'worm', 'worm', 'fruit', 'treat'];
-        const targetY = Math.max(300, Math.min(500, my));
+        const targetY = Math.max(120, Math.min(520, my));
         g.droppedFood.push({
           x: Math.max(80, Math.min(640, mx)), y: targetY,
           type: types[Math.floor(Math.random()*types.length)],
@@ -1687,14 +1728,28 @@ function drawIsoGroundToCtx(targetCtx) {
   if (g.isDay) {
     targetCtx.fillStyle = '#3d8b37';
     targetCtx.fillRect(0, 0, 720, 576);
-    targetCtx.fillStyle = '#1a4515';
-    targetCtx.fillRect(0, 566, 720, 10);
   } else {
     targetCtx.fillStyle = '#1f4a1f';
     targetCtx.fillRect(0, 0, 720, 576);
-    targetCtx.fillStyle = '#0a120a';
-    targetCtx.fillRect(0, 566, 720, 10);
   }
+  const baseColor = g.isDay ? '#2d7b27' : '#0f3a0f';
+  targetCtx.strokeStyle = baseColor;
+  targetCtx.lineWidth = 1;
+  const MIN = -10, MAX = 16;
+  targetCtx.beginPath();
+  for (let col = MIN; col <= MAX; col++) {
+    const p1 = isoToScreen(col, MIN);
+    targetCtx.moveTo(p1.x, p1.y);
+    const p2 = isoToScreen(col, MAX);
+    targetCtx.lineTo(p2.x, p2.y);
+  }
+  for (let row = MIN; row <= MAX; row++) {
+    const p1 = isoToScreen(MIN, row);
+    targetCtx.moveTo(p1.x, p1.y);
+    const p2 = isoToScreen(MAX, row);
+    targetCtx.lineTo(p2.x, p2.y);
+  }
+  targetCtx.stroke();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1737,6 +1792,7 @@ window.showInteractSelect = function() {
   msg.style.maxWidth = '400px';
   overlay.classList.add('show');
 };
+
 
 window.toggleInteractPet = function(petId) {
   const idx = selectedInteractPets.indexOf(petId);
@@ -4477,14 +4533,32 @@ function getGeneDesc(gk) {
   return descs[gk] || '未知';
 }
 
-function releasePet(idx) {
+window.releasePet = function(idx) {
   const pet = g.pets[idx];
   if (!pet) return;
-  showToast(`${pet.name} 回到了大自然...`);
   g.pets.splice(idx, 1);
   if (g.currentPet === pet) {
     g.currentPet = g.pets.length > 0 ? g.pets[g.pets.length - 1] : null;
   }
-  closeOverlay();
   saveGame();
-}
+  if (g.pets.length > 0) {
+    doSynthesize();
+  } else {
+    closeOverlay();
+  }
+  showToast(`${pet.name} 回到了大自然...`);
+};
+
+window.confirmBanishPet = function(idx) {
+  const pet = g.pets[idx];
+  if (!pet) return;
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = `<div class="title" style="color:#f55">⚠️ 确认放逐</div>
+    <div style="margin:12px 0;font-size:15px">确定要放逐 <span style="color:#FF69B4">${pet.name}</span> 吗？</div>
+    <div style="color:#888;font-size:12px">此操作不可撤销</div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button onclick="releasePet(${idx})" style="flex:1;padding:10px;background:#2a1a1a;border:2px solid #f55;color:#faa;cursor:pointer">确认放逐</button>
+      <button onclick="closeOverlay()" style="flex:1;padding:10px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">取消</button>
+    </div>`;
+};

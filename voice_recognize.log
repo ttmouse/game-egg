@@ -80,3 +80,10 @@
 {"time": "2026-05-23T19:20:46.544842", "audio_size": 6426, "raw_text": "", "converted_text": "", "command_matched": null}
 {"time": "2026-05-23T19:20:54.792647", "audio_size": 27344, "raw_text": "報速", "converted_text": "报速", "command_matched": null}
 {"time": "2026-05-23T19:20:59.213819", "audio_size": 24446, "raw_text": "圓圈", "converted_text": "圓圈", "command_matched": null}
+{"time": "2026-05-24T10:31:55.904548", "audio_size": 60188, "raw_text": "试试", "converted_text": "试试", "command_matched": null}
+{"time": "2026-05-24T11:22:12.252126", "audio_size": 10290, "raw_text": "", "converted_text": "", "command_matched": null}
+{"time": "2026-05-24T11:22:21.529972", "audio_size": 124278, "raw_text": "", "converted_text": "", "command_matched": null}
+{"time": "2026-05-24T13:23:02.923081", "audio_size": 70182, "raw_text": "報酬", "converted_text": "报酬", "command_matched": null}
+{"time": "2026-05-24T13:23:08.158284", "audio_size": 51828, "raw_text": "排隊", "converted_text": "排队", "command_matched": null}
+{"time": "2026-05-24T13:23:12.843631", "audio_size": 37970, "raw_text": "報書", "converted_text": "报書", "command_matched": null}
+{"time": "2026-05-24T13:23:20.101162", "audio_size": 40236, "raw_text": "", "converted_text": "", "command_matched": null}

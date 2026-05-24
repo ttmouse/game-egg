@@ -261,7 +261,7 @@ body {
 /* ─── 事件/Toast 提示 ─── */
 #evt {
   position: fixed;
-  top: max(env(safe-area-inset-top, 0px) + 52px, 52px);
+  top: max(env(safe-area-inset-top, 0px) + 90px, 90px);
   left: 50%;
   transform: translateX(-50%);
   background: #1a1a2e;
@@ -317,12 +317,13 @@ body {
     <button class="bt" id="btnPet" onclick="doPet()" style="display:none">🫂 抚摸<br><span class="cooldown" id="petCd">可用</span></button>
     <button class="bt" id="btnFeed" onclick="showFeedSelect()" style="display:none">🍖 喂食<br><span class="cooldown" id="feedStatus">可用</span></button>
     <button class="bt" id="btnForage" onclick="doForage()">🔍 找食物<br><span class="cooldown" id="forageCd">可用</span></button>
-    <button class="bt" id="btnBreed" onclick="doSynthesize()">⚗️ 合成<br><span class="cooldown" id="breedStatus">可用</span></button>
+    <button class="bt" id="btnBreed" onclick="doSynthesize()">🐾 宠物<br><span class="cooldown" id="breedStatus">管理</span></button>
     <button class="bt" id="btnInteract" onclick="showInteractSelect()">🎮 互动<br><span class="cooldown" id="interactStatus">可用</span></button>
-    <button class="bt" onclick="showToolSelect()">🧰 道具</button>
+    <button class="bt" id="btnTools" onclick="showToolSelect()">🧰 道具</button>
     <div class="btnSep"></div>
     <!-- 工具 -->
-    <button class="bt" onclick="showAlbum()">📖 图鉴</button>
+    <button class="bt" id="btnAlbum" onclick="showAlbum()">📖 图鉴</button>
+
     <button class="bt" id="btnFlip" onclick="toggleCanvasFlip()">🔲 翻转</button>
     <button class="bt" id="btnVoice" onclick="startVoiceCommand()">🎤 喊话<br><span class="cooldown" id="voiceStatus">可用</span></button>
     <div class="btnSep"></div>
