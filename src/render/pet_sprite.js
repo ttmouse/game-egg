@@ -1,6 +1,6 @@
 import { GENES } from '../config.js';
 
-export function drawPetSprite(canvas, pet, animTime) {
+export function drawPetSprite(canvas, pet, animTime, speedFactor = 0, walkPhase = 0) {
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, 48, 48);
@@ -32,7 +32,9 @@ export function drawPetSprite(canvas, pet, animTime) {
   const bodyColor = `hsl(${geneHue},${geneSat}%,55%)`;
   const darkColor = `hsl(${geneHue},${geneSat}%,35%)`;
   const lightColor = `hsl(${geneHue},${geneSat}%,75%)`;
-  const cx = 24, cy = 26 + breathe;
+  const bodySway = speedFactor > 0.1 ? Math.sin(walkPhase) * speedFactor * 0.6 : 0;
+  const walkLift = speedFactor > 0.1 ? Math.sin(walkPhase) * 1.8 : 0;
+  const cx = 24 + bodySway, cy = 26 + breathe;
   const tailOff = Math.round(tailSwing);
 
   // ─── 尾巴 ───
@@ -104,14 +106,14 @@ export function drawPetSprite(canvas, pet, animTime) {
 
   // ─── 脚 ───
   const footFns = [
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10, 5, 4); ctx.fillRect(cx+3, cy+10, 5, 4); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10, 5, 4); ctx.fillRect(cx+3, cy+10, 5, 4); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-9, cy+10, 7, 5); ctx.fillRect(cx+2, cy+10, 7, 5); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10, 5, 4); ctx.fillRect(cx+3, cy+10, 5, 4); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-6, cy+10, 4, 3); ctx.fillRect(cx+2, cy+10, 4, 3); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-9, cy+10, 6, 4); ctx.fillRect(cx+3, cy+10, 6, 4); ctx.fillStyle = lightColor; ctx.fillRect(cx-8, cy+11, 2, 1); ctx.fillRect(cx+6, cy+11, 2, 1); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-6, cy+11, 3, 3); ctx.fillRect(cx+3, cy+11, 3, 3); },
-    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-10, cy+10, 8, 5); ctx.fillRect(cx+2, cy+10, 8, 5); ctx.fillStyle = lightColor; ctx.fillRect(cx-8, cy+12, 4, 2); ctx.fillRect(cx+4, cy+12, 4, 2); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10 - walkLift, 5, 4); ctx.fillRect(cx+3, cy+10 + walkLift, 5, 4); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10 - walkLift, 5, 4); ctx.fillRect(cx+3, cy+10 + walkLift, 5, 4); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-9, cy+10 - walkLift, 7, 5); ctx.fillRect(cx+2, cy+10 + walkLift, 7, 5); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-8, cy+10 - walkLift, 5, 4); ctx.fillRect(cx+3, cy+10 + walkLift, 5, 4); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-6, cy+10 - walkLift, 4, 3); ctx.fillRect(cx+2, cy+10 + walkLift, 4, 3); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-9, cy+10 - walkLift, 6, 4); ctx.fillRect(cx+3, cy+10 + walkLift, 6, 4); ctx.fillStyle = lightColor; ctx.fillRect(cx-8, cy+11 - walkLift, 2, 1); ctx.fillRect(cx+6, cy+11 + walkLift, 2, 1); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-6, cy+11 - walkLift, 3, 3); ctx.fillRect(cx+3, cy+11 + walkLift, 3, 3); },
+    () => { ctx.fillStyle = darkColor; ctx.fillRect(cx-10, cy+10 - walkLift, 8, 5); ctx.fillRect(cx+2, cy+10 + walkLift, 8, 5); ctx.fillStyle = lightColor; ctx.fillRect(cx-8, cy+12 - walkLift, 4, 2); ctx.fillRect(cx+4, cy+12 + walkLift, 4, 2); },
   ];
   footFns[petType]();
 

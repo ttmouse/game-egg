@@ -81,26 +81,34 @@ function drawPet(pet, x, y, options = {}) {
     else if (type === 'heart') offsetY = Math.sin(tm * Math.PI * 4) * 5;
   }
 
-  // Shadow
+  // Dynamic shadow — squashes when walking, normal when still
   if (!isDragging) {
-    const shadowW = 50 * scale * 0.5;
-    const shadowH = 8 * scale * 0.5;
-    const shadowY = basePy + 20;
+    const speedSquash = pet._speedFactor || 0;
+    const shadowW = (50 * scale * 0.5) * (1 + speedSquash * 0.15);
+    const shadowH = (8 * scale * 0.5) * (1 - speedSquash * 0.3);
+    const shadowY = basePy + 20 + speedSquash * 1;
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.fillStyle = `rgba(0,0,0,${0.12 + speedSquash * 0.06})`;
     ctx.beginPath();
     ctx.ellipse(basePx, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
+  // Physics-based walk bob (frequency & amplitude tied to speed)
   let walkBob = 0;
-  if (pet.wanderTarget) walkBob = Math.sin(g.lastTs / 120) * 2;
+  if (pet._speedFactor && pet._speedFactor > 0.05) {
+    walkBob = Math.sin((pet._walkPhase || 0) * 2) * (1.5 + pet._speedFactor * 2);
+  }
+  // Landing settle bounce after stopping
+  if (pet._landBounce && pet._landBounce > 0) {
+    walkBob += -Math.abs(Math.sin(pet._landBounce * 10)) * 3 * pet._landBounce;
+  }
 
   const petCanvas = document.createElement('canvas');
   petCanvas.width = 48;
   petCanvas.height = 48;
-  drawPetSprite(petCanvas, pet, g.lastTs / 1000);
+  drawPetSprite(petCanvas, pet, g.lastTs / 1000, pet._speedFactor || 0, pet._walkPhase || 0);
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -154,13 +162,14 @@ function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
   const isDragging = options.isDragging || false;
   const moodBubble = options.moodBubble || { show: false };
 
-  // Shadow
+  // Dynamic shadow
   if (!isDragging) {
-    const shadowW = 50 * scale * 0.5;
-    const shadowH = 8 * scale * 0.5;
-    const shadowY = basePy + 20;
+    const speedSquash = pet._speedFactor || 0;
+    const shadowW = (50 * scale * 0.5) * (1 + speedSquash * 0.15);
+    const shadowH = (8 * scale * 0.5) * (1 - speedSquash * 0.3);
+    const shadowY = basePy + 20 + speedSquash * 1;
     targetCtx.save();
-    targetCtx.fillStyle = 'rgba(0,0,0,0.15)';
+    targetCtx.fillStyle = `rgba(0,0,0,${0.12 + speedSquash * 0.06})`;
     targetCtx.beginPath();
     targetCtx.ellipse(basePx, shadowY, shadowW, shadowH, 0, 0, Math.PI * 2);
     targetCtx.fill();
@@ -170,7 +179,7 @@ function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
   const petCanvas = document.createElement('canvas');
   petCanvas.width = 48;
   petCanvas.height = 48;
-  drawPetSprite(petCanvas, pet, g.lastTs / 1000);
+  drawPetSprite(petCanvas, pet, g.lastTs / 1000, pet._speedFactor || 0, pet._walkPhase || 0);
 
   targetCtx.save();
   targetCtx.imageSmoothingEnabled = false;
@@ -221,7 +230,8 @@ function drawIcn(text, x, y, color, scale = 1.3) {
   const fontSize = Math.max(12, Math.floor(18 * scale));
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${fontSize}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Microsoft YaHei",sans-serif`;
+  // 中文字体在前：数字/中文用正常比例，emoji 再回落给 emoji 字体
+  ctx.font = `${fontSize}px "Microsoft YaHei","PingFang SC","Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
   ctx.textBaseline = 'top';
   ctx.fillText(text, Math.floor(x), Math.floor(y));
   ctx.restore();
@@ -230,75 +240,95 @@ function drawIcn(text, x, y, color, scale = 1.3) {
 function drawHUD() {
   ctx.fillStyle = 'rgba(0,0,0,0.8)';
   ctx.fillRect(0, 0, LOG_W, 80);
-  const Y1 = 6, Y2 = 40;
+  const Y1 = 6, Y2 = 42;
+
+  // ── 列对齐常量（两行共享） ──
+  const C_TIME = 8;     // 时间 / 📅天
+  const C_ICON = 84;    // 🥚 / 🍖
+  const C_BAR  = 106;   // 进度条（宽 68，紧贴 🥚 之后）
+  const C_PCT  = 180;   // % / 数字（紧贴进度条之后）
+  const C_TEMP = 230;   // 🌡温度（与 G2 组之间有明显间距）
+  const C_POW  = 300;   // ⚡电量
+  const C_PETS = 360;   // 🐾宠物数
+  const C_HEAT = 615;   // 孵化状态（靠右）
 
   // ── 第一行 ──
   const timeIcon = g.isDay ? '☀' : '🌙';
   const rem = g.isDay ? DAY_SEC - g.time : NGT_SEC - (g.time - DAY_SEC);
-  drawIcn(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, 6, Y1, P.txt, 1.1);
+  drawIcn(`${timeIcon} ${Math.floor(rem/60)}:${String(Math.floor(rem%60)).padStart(2,'0')}`, C_TIME, Y1, P.txt, 1.1);
 
-  // 孵化
-  drawIcn('🥚', 78, Y1, '#aaa', 1.1);
+  // 进度条颜色：按温度而非加热器开关
+  let hatchBarClr = '#666';
+  if (g.temp > TEMP_OPT_MAX) hatchBarClr = P.danger;
+  else if (g.temp >= TEMP_OPT_MIN) hatchBarClr = '#4CAF50';
+  else if (g.temp >= 30) hatchBarClr = '#FFC107';
+  drawIcn('🥚', C_ICON, Y1, '#aaa', 1.1);
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(100, Y1 + 4, 70, 8);
-  const hatchColor = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
-  ctx.fillStyle = hatchColor;
-  ctx.fillRect(100, Y1 + 4, Math.floor(70 * g.hatchPct / 100), 8);
-  drawIcn(`${Math.floor(g.hatchPct)}%`, 174, Y1, hatchColor, 1.0);
+  ctx.fillRect(C_BAR, Y1 + 4, 60, 8);
+  ctx.fillStyle = hatchBarClr;
+  ctx.fillRect(C_BAR, Y1 + 4, Math.floor(60 * g.hatchPct / 100), 8);
+  drawIcn(`${Math.floor(g.hatchPct)}%`, C_PCT, Y1, hatchBarClr, 1.0);
 
-  // 温度
   const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
   const tempColor = g.temp > 40 ? P.danger : (g.temp < 30 ? P.tempCold : (inOpt ? P.happy : P.warn));
-  drawIcn(`🌡${g.temp.toFixed(0)}°`, 260, Y1, tempColor, 1.1);
+  drawIcn(`🌡${g.temp.toFixed(0)}°`, C_TEMP, Y1, tempColor, 1.1);
 
-  // 电量
   const pColor = g.power < 20 ? P.danger : (g.power < 40 ? P.warn : '#4CAF50');
-  drawIcn(`⚡${Math.floor(g.power)}`, 350, Y1, pColor, 1.1);
+  drawIcn(`⚡${Math.floor(g.power)}`, C_POW, Y1, pColor, 1.1);
 
-  // 宠物
-  drawIcn(`🐾${g.pets.length}`, 440, Y1, '#aaa', 1.1);
+  drawIcn(`🐾${g.pets.length}`, C_PETS, Y1, '#aaa', 1.1);
 
-  // ── 第二行 ──
-  drawIcn(`📅${g.dayCount}天`, 6, Y2, '#aaa', 1.1);
+  // 孵化状态取决于温度，不绑加热器开关
+  let statusText = '', statusClr = P.dim;
+  if (g.iceOn) {
+    statusText = '🧊冷却'; statusClr = '#00BFFF';
+  } else if (g.temp > TEMP_OPT_MAX) {
+    statusText = '🔥过热!'; statusClr = P.danger;
+  } else if (g.temp >= TEMP_OPT_MIN) {
+    statusText = '🔥孵化中'; statusClr = '#4CAF50';
+  } else if (g.temp >= 30) {
+    statusText = g.heatOn ? '🔥升温中' : '🌡余温';
+    statusClr = '#FFC107';
+  } else {
+    statusText = '⏸暂停'; statusClr = P.dim;
+  }
+  // 加热器没电了优先显示
+  if (g.heatOn && g.power <= 0) {
+    statusText = '🔥无电'; statusClr = P.dim;
+  }
+  drawIcn(statusText, C_HEAT, Y1, statusClr, 1.1);
+
+  // ── 第二行（与第一行列对齐） ──
+  drawIcn(`📅${g.dayCount}天`, C_TIME, Y2, '#aaa', 1.1);
 
   if (g.currentPet) {
     const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
-    drawIcn('🍖', 100, Y2, '#aaa', 1.1);
+    drawIcn('🍖', C_ICON, Y2, '#aaa', 1.1);
     ctx.fillStyle = P.barBg;
-    ctx.fillRect(122, Y2 + 4, 70, 8);
+    ctx.fillRect(C_BAR, Y2 + 4, 60, 8);
     ctx.fillStyle = hungerColor;
-    ctx.fillRect(122, Y2 + 4, Math.floor(70 * g.hunger / 100), 8);
-    drawIcn(`${Math.floor(g.hunger)}`, 196, Y2, hungerColor, 1.0);
+    ctx.fillRect(C_BAR, Y2 + 4, Math.floor(60 * g.hunger / 100), 8);
+    drawIcn(`${Math.floor(g.hunger)}`, C_PCT, Y2, hungerColor, 1.0);
   }
-
-  // 加热/冰袋（右上角）
-  let heatIcon = '', heatClr = P.dim;
-  if (g.heatOn && g.power > 0) { heatIcon = '🔥加'; heatClr = '#FF4500'; }
-  else if (g.heatOn) { heatIcon = '🔥零电'; heatClr = P.dim; }
-  else if (g.iceOn) { heatIcon = '🧊'; heatClr = '#00BFFF'; }
-  else { heatIcon = '❄'; heatClr = P.dim; }
-  drawIcn(heatIcon, 680, Y1, heatClr, 1.1);
 }
 
 function drawFeedInventory() {
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(0, LOG_H - 40, LOG_W, 40);
   const yy = LOG_H - 32;
-  // 道具图标（均匀间隔）
-  drawIcn('🧰', 8, yy, '#aaa', 1.0);
-  drawIcn(`🪱${g.inventory.worm}`, 44, yy, g.inventory.worm > 0 ? '#fff' : '#555', 1.0);
-  drawIcn(`🍎${g.inventory.fruit}`, 104, yy, g.inventory.fruit > 0 ? '#fff' : '#555', 1.0);
-  drawIcn(`🍪${g.inventory.treat}`, 164, yy, g.inventory.treat > 0 ? '#fff' : '#555', 1.0);
+  let cx = 8;
+  // 道具图标（游标递进，避免重叠）
+  drawIcn('🧰', cx, yy, '#aaa', 1.0);
+  cx += 30;
+  drawIcn(`🪱${g.inventory.worm}`, cx, yy, g.inventory.worm > 0 ? '#fff' : '#555', 1.0);
+  cx += 52;
+  drawIcn(`🍎${g.inventory.fruit}`, cx, yy, g.inventory.fruit > 0 ? '#fff' : '#555', 1.0);
+  cx += 52;
+  drawIcn(`🍪${g.inventory.treat}`, cx, yy, g.inventory.treat > 0 ? '#fff' : '#555', 1.0);
+  cx += 52;
   // 分隔线
   ctx.fillStyle = '#444';
-  ctx.fillRect(220, LOG_H - 34, 1, 28);
-  // 加热/冰袋状态
-  let heatIcn = '', heatClr = P.dim;
-  if (g.heatOn && g.power > 0) { heatIcn = '🔥中'; heatClr = '#FF4500'; }
-  else if (g.heatOn) { heatIcn = '🔥无电'; heatClr = P.dim; }
-  else if (g.iceOn) { heatIcn = '🧊'; heatClr = '#00BFFF'; }
-  else { heatIcn = '❄'; heatClr = '#555'; }
-  drawIcn(heatIcn, 670, yy, heatClr, 1.0);
+  ctx.fillRect(cx, LOG_H - 34, 1, 28);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -697,6 +727,9 @@ function seekFood(pet) {
     pet.clickReaction = { type: 'heart', time: 0 };
     showToast(`${pet.name} 吃了${foodType === 'worm' ? '虫子' : foodType === 'fruit' ? '水果' : '饲料'}！`);
     pet.wanderTarget = null;
+    pet._vx = 0;
+    pet._vy = 0;
+    pet._speedFactor = 0;
     pet.wanderIdle = 1 + Math.random() * 2;
     pet.wanderTimer = pet.wanderIdle;
     saveGame();
@@ -715,6 +748,20 @@ function updatePetWander(dt) {
   g.pets.forEach(pet => {
     if (!pet.scenePos || g.draggingPetId === pet.id || g.hoveredPetId === pet.id) return;
     if (pet.interactAnim && pet.interactAnim.time > 0) return;
+
+    // Lazy-init physics fields
+    if (pet._vx === undefined) pet._vx = 0;
+    if (pet._vy === undefined) pet._vy = 0;
+    if (pet._speedFactor === undefined) pet._speedFactor = 0;
+    if (pet._walkPhase === undefined) pet._walkPhase = 0;
+    if (pet._landBounce === undefined) pet._landBounce = 0;
+
+    // Decay landing bounce
+    if (pet._landBounce > 0) {
+      pet._landBounce -= dt * 2;
+      if (pet._landBounce < 0) pet._landBounce = 0;
+    }
+
     seekFood(pet);
     pet.wanderTimer -= dt;
     if (pet.wanderTimer <= 0) {
@@ -722,6 +769,8 @@ function updatePetWander(dt) {
         pet.wanderTarget = { x: 80 + Math.random() * 560, y: 310 + Math.random() * 180 };
         pet.wanderSpeed = 0.4 + Math.random() * 0.8;
         pet.wanderIdle = 0;
+        pet._vx = 0;
+        pet._vy = 0;
         if (pet.wanderTarget.x < pet.scenePos.x) pet.facingRight = false;
         else pet.facingRight = true;
       } else {
@@ -730,28 +779,67 @@ function updatePetWander(dt) {
       }
       pet.wanderTimer = pet.wanderTarget ? 3 + Math.random() * 4 : pet.wanderIdle;
     }
+
+    const accel = 2.5;
+    const friction = 4.0;
+
     if (pet.wanderTarget && !pet.interactAnim) {
       const dx = pet.wanderTarget.x - pet.scenePos.x;
       const dy = pet.wanderTarget.y - pet.scenePos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
+
       if (dist < 3) {
         pet.wanderTarget = null;
+        pet._landBounce = 0.45;
+        pet._vx = 0;
+        pet._vy = 0;
+        pet._speedFactor = 0;
         pet.wanderIdle = 1 + Math.random() * 3;
         pet.wanderTimer = pet.wanderIdle;
+      } else if (dist < 20) {
+        // Slow zone: decelerate on approach
+        const slowDown = dist / 20;
+        const targetSpeed = pet.wanderSpeed * 60 * dt * slowDown;
+        const tVx = (dx / dist) * targetSpeed;
+        const tVy = (dy / dist) * targetSpeed;
+        pet._vx += (tVx - pet._vx) * Math.min(1, accel * dt * 2);
+        pet._vy += (tVy - pet._vy) * Math.min(1, accel * dt * 2);
+        pet.scenePos.x += pet._vx;
+        pet.scenePos.y += pet._vy;
+        pet._speedFactor = Math.sqrt(pet._vx * pet._vx + pet._vy * pet._vy) / (pet.wanderSpeed * 60 * dt || 0.01);
+        pet._speedFactor = Math.min(1, pet._speedFactor);
+        pet._walkPhase += pet._speedFactor * 0.15 * dt * 60;
       } else {
-        const speed = pet.wanderSpeed * 60 * dt;
-        const moveX = (dx / dist) * speed;
-        const moveY = (dy / dist) * speed;
-        pet.scenePos.x += moveX;
-        pet.scenePos.y += moveY;
-        pet.scenePos.x = Math.max(50, Math.min(670, pet.scenePos.x));
-        pet.scenePos.y = Math.max(290, Math.min(500, pet.scenePos.y));
-        if (moveX < -0.1) pet.facingRight = false;
-        else if (moveX > 0.1) pet.facingRight = true;
-        const { col, row } = screenToIso(pet.scenePos.x, pet.scenePos.y);
-        pet.isoCol = Math.max(0, Math.min(4, col));
-        pet.isoRow = Math.max(0, Math.min(2, row));
+        // Cruise zone: accelerate to target speed
+        const targetSpeed = pet.wanderSpeed * 60 * dt;
+        const tVx = (dx / dist) * targetSpeed;
+        const tVy = (dy / dist) * targetSpeed;
+        pet._vx += (tVx - pet._vx) * Math.min(1, accel * dt);
+        pet._vy += (tVy - pet._vy) * Math.min(1, accel * dt);
+        pet.scenePos.x += pet._vx;
+        pet.scenePos.y += pet._vy;
+        pet._speedFactor = Math.sqrt(pet._vx * pet._vx + pet._vy * pet._vy) / (targetSpeed || 0.01);
+        pet._speedFactor = Math.min(1, pet._speedFactor);
+        pet._walkPhase += pet._speedFactor * 0.15 * dt * 60;
       }
+
+      pet.scenePos.x = Math.max(50, Math.min(670, pet.scenePos.x));
+      pet.scenePos.y = Math.max(290, Math.min(500, pet.scenePos.y));
+
+      // Sync facing direction with velocity
+      if (pet._vx < -0.1) pet.facingRight = false;
+      else if (pet._vx > 0.1) pet.facingRight = true;
+
+      const { col, row } = screenToIso(pet.scenePos.x, pet.scenePos.y);
+      pet.isoCol = Math.max(0, Math.min(4, col));
+      pet.isoRow = Math.max(0, Math.min(2, row));
+    } else if (!pet.wanderTarget) {
+      // Friction deceleration when no target
+      pet._vx *= Math.max(0, 1 - friction * dt);
+      pet._vy *= Math.max(0, 1 - friction * dt);
+      pet._speedFactor *= Math.max(0, 1 - friction * dt * 2);
+      if (Math.abs(pet._vx) < 0.01) pet._vx = 0;
+      if (Math.abs(pet._vy) < 0.01) pet._vy = 0;
     }
   });
 }
@@ -822,19 +910,26 @@ function update(dt) {
     if (Math.abs(g.temp - roomTemp) > 0.5) g.temp += (roomTemp - g.temp) * 0.02 * dt;
   }
 
-  let rate = HATCH_RATE;
-  if (g.temp < TEMP_OPT_MIN) { rate = HATCH_RATE_COLD; if (g.temp < 30) g.intimacy = Math.max(0, g.intimacy - 0.05 * dt); }
-  else if (g.temp > TEMP_OPT_MAX) rate = HATCH_RATE_HOT;
+  // 孵蛋进度：取决于蛋的实际温度，而非加热器开关
+  const TEMP_WARM = 30; // ≥此温度时有残余孵化
+  let rate = 0;
+  if (g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX) {
+    rate = HATCH_RATE; // 最优温度 → 快速孵化
+  } else if (g.temp > TEMP_OPT_MAX) {
+    rate = HATCH_RATE_HOT; // 过热 → 倒退
+  } else if (g.temp >= TEMP_WARM) {
+    rate = 0.2; // 有余温 → 慢速孵化（停止加热后仍可持续一段时间）
+  }
+  // < TEMP_WARM → rate = 0，冷却无进展
   rate *= (1 + (g.intimacy / 100) * 0.5);
-
-  if (!g.heatOn && !g.iceOn) {
-    g.passiveHatchTimer = (g.passiveHatchTimer || 0) + dt;
-    if (g.passiveHatchTimer >= 30) { g.passiveHatchTimer = 0; g.hatchPct = Math.min(100, g.hatchPct + 1); }
-  } else g.passiveHatchTimer = 0;
+  if (g.temp < TEMP_WARM) g.intimacy = Math.max(0, g.intimacy - 0.03 * dt);
 
   if (g.currentPet) g.hunger = Math.max(0, g.hunger - 0.01 * dt);
 
   g.hatchPct = Math.min(100, Math.max(0, g.hatchPct + rate * dt));
+
+  // 记录孵化状态（供 UI/蛋光晕判断）
+  g.incubating = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
 
   const newStage = Math.floor(g.hatchPct / 20);
   if (newStage > g.crackStage && g.crackStage < 4) {
@@ -958,6 +1053,21 @@ window.doPet = function() {
   updateBtnUI(); saveGame();
 };
 
+// ─── 设置菜单（顶部栏 ⚙️） ───
+window.showSettings = function() {
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = `
+    <div style="font-size:14px;margin-bottom:10px;color:#FFD700">⚙️ 设置</div>
+    <button onclick="closeOverlay();resetGame()" style="background:#3a1a1a;border:2px solid #f55;color:#faa;padding:10px 20px;font-family:monospace;font-size:13px;cursor:pointer;border-radius:6px;min-width:140px;margin-top:4px">
+      🔄 重开游戏
+    </button>
+    <div style="margin-top:12px"><button onclick="closeOverlay()" style="background:#333;border:2px solid #666;color:#fff;padding:8px 20px;font-family:monospace;font-size:12px;cursor:pointer;border-radius:4px">取消</button></div>
+  `;
+  msg.style.maxWidth = '260px';
+  overlay.classList.add('show');
+};
+
 window.resetGame = function() {
   if (!confirm('确定要重置所有进度吗？')) return;
   localStorage.removeItem('hatchgame_save');
@@ -985,13 +1095,18 @@ window.toggleCanvasFlip = function() {
 };
 
 function updateBtnUI() {
+  // 更新顶部栏场景标题
+  const titleEl = document.getElementById('topSceneTitle');
+  if (titleEl) {
+    titleEl.textContent = g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间';
+  }
   const heatBtn = document.getElementById('btnHeat');
   if (heatBtn) {
     heatBtn.className = 'bt' + (g.heatOn ? ' off' : '');
     document.getElementById('heatStatus').textContent = g.heatOn ? '开启中' : (g.power > 0 ? '开启' : '无电');
   }
-  document.getElementById('btnPet').style.display = g.currentPet ? 'inline-block' : 'none';
-  document.getElementById('btnFeed').style.display = g.currentPet ? 'inline-block' : 'none';
+  document.getElementById('btnPet').style.display = g.currentPet ? '' : 'none';
+  document.getElementById('btnFeed').style.display = g.currentPet ? '' : 'none';
   const totalFood = g.inventory.worm + g.inventory.fruit + g.inventory.treat;
   document.getElementById('feedStatus').textContent = totalFood > 0 ? (g.feedCdLeft > 0 ? `${Math.ceil(g.feedCdLeft)}秒` : '可用') : '无食物';
   document.getElementById('petCd').textContent = g.petCdLeft > 0 ? `${Math.ceil(g.petCdLeft)}秒` : '可用';
@@ -1124,7 +1239,6 @@ function loop() {
     }
   }
 
-  drawText(g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间', 700, 8, '#aaa', 1);
   drawHUD();
   drawFeedInventory();
   updateBtnUI();
@@ -1142,7 +1256,7 @@ export function init(c, c2d) {
       const offline = (Date.now() - data.lastSave) / 1000;
       const offlineMins = Math.min(offline / 60, 10);
       g.temp = Math.max(TEMP_MIN, g.temp - offlineMins * 0.02);
-      g.hatchPct = Math.min(100, g.hatchPct + offlineMins * 0.05);
+      // 离线不增长孵化进度
       if (g.hunger !== undefined) g.hunger = Math.max(0, g.hunger - offlineMins * 0.5);
     }
 
@@ -1257,27 +1371,9 @@ function setupInput(canvasEl) {
       saveGame();
     }
 
-    // 战斗点击处理
+    // 战斗点击处理（自动战斗，只需处理结果按钮）
     if (g.interactGame === 'battle' && battleState) {
-      // 技能选择
-      if (battleState.animPhase === 'skillSelect' && battleState.skillBtns) {
-        for (const btn of battleState.skillBtns) {
-          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
-            doBattleSkill(btn.skillKey);
-            return;
-          }
-        }
-      }
-      // 目标选择
-      if (battleState.animPhase === 'targeting' && battleState.targetBtns) {
-        for (const btn of battleState.targetBtns) {
-          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
-            doBattleTarget(btn.petId);
-            return;
-          }
-        }
-      }
-      // 结果按钮
+      // 结果按钮（再来一局 / 退出）
       if (battleState.animPhase === 'result' && window._battleResultBtns) {
         for (const btn of window._battleResultBtns) {
           if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
@@ -1374,6 +1470,9 @@ function setupInput(canvasEl) {
       if (pet && g.dragMoved) {
         pet.clickReaction = { type: 'bounce', time: 0 };
         pet.wanderTarget = null;
+        pet._vx = 0;
+        pet._vy = 0;
+        pet._speedFactor = 0;
         pet.wanderIdle = 2 + Math.random() * 3;
         pet.wanderTimer = pet.wanderIdle;
         saveGame();
@@ -1458,6 +1557,9 @@ function setupInput(canvasEl) {
       if (pet && g.dragMoved) {
         pet.clickReaction = { type: 'bounce', time: 0 };
         pet.wanderTarget = null;
+        pet._vx = 0;
+        pet._vy = 0;
+        pet._speedFactor = 0;
         pet.wanderIdle = 2 + Math.random() * 3;
         pet.wanderTimer = pet.wanderIdle;
         saveGame();
@@ -1574,15 +1676,21 @@ window.showInteractSelect = function() {
   selectedInteractPets = [];
 
   let html = '<div style="font-size:14px;margin-bottom:8px">🎮 选择要互动的宠物（可多选）</div>';
-  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-height:280px;overflow-y:auto;">';
+  // 使用 grid 布局，固定列宽，避免 flex-wrap 错位
+  const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(g.pets.length))));
+  html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;max-height:300px;overflow-y:auto;padding:4px;">`;
 
   g.pets.forEach((pet) => {
     const geneStr = (pet.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
-    html += `<button id="ivt_pet_${pet.id}" onclick="toggleInteractPet(${pet.id})" style="background:#222;border:3px solid #555;color:#fff;padding:8px 10px;font-family:monospace;font-size:11px;cursor:pointer;min-width:80px;display:flex;flex-direction:column;align-items:center;gap:2px">
-      <span style="font-size:15px">${pet.name}</span>
-      <span style="color:#aaa;font-size:9px">${pet.star}★ Lv${pet.level}</span>
-      <span style="font-size:10px">${geneStr}</span>
-    </button>`;
+    html += `<div id="ivt_pet_${pet.id}" onclick="toggleInteractPet('${pet.id}')" style="
+      background:#1a1a2e;border:2px solid #555;border-radius:8px;padding:10px 6px;cursor:pointer;text-align:center;
+      display:flex;flex-direction:column;align-items:center;gap:3px;min-height:80px;
+      transition:background 0.15s,border-color 0.15s;
+    ">
+      <span style="font-size:15px;font-weight:bold;color:#fff">${pet.name}</span>
+      <span style="color:#aaa;font-size:10px">${pet.star}★ Lv${pet.level}</span>
+      <span style="font-size:11px">${geneStr}</span>
+    </div>`;
   });
 
   html += '</div>';
@@ -1796,6 +1904,9 @@ function executeVoiceCommand(text) {
         pet.scenePos.y = positions[i].y;
       }
       pet.wanderTarget = null;
+      pet._vx = 0;
+      pet._vy = 0;
+      pet._speedFactor = 0;
       pet.wanderTimer = holdSeconds + Math.random() * 3;
       pet.wanderIdle = 0;
       pet.petMood = 'normal';
@@ -2422,11 +2533,11 @@ function updateVolleyball(dt) {
     const distToBall = Math.sqrt((vg.ball.x - rp.x) ** 2 + (vg.ball.y - rp.y) ** 2);
     const timeToReach = Math.max(0.2, distToBall / 220);
     const predicted = predictBallAt(vg.ball, timeToReach, vg.gravity, vg.netX, vg.netTop, vg.groundY);
-    // 接球目标：预测球位置，但 y 不低于 200（宠物能跳起来接）
+    // 接球目标：预测球位置，但 y 不低于 120（宠物能跳很高来接）
     vg.catchTarget = vg.catchTarget || [null, null];
     vg.catchTarget[receiver] = {
       x: predicted.x,
-      y: Math.max(200, Math.min(vg.groundY - 30, predicted.y))
+      y: Math.max(80, Math.min(vg.groundY - 30, predicted.y))
     };
   }
 
@@ -2449,8 +2560,8 @@ function updateVolleyball(dt) {
       } else {
         p.x = Math.max(vg.netX + 40, Math.min(670, p.x));
       }
-      // 宠物可跳起接球：y 下限从 350 改为 200（数值越小跳得越高）
-      p.y = Math.max(200, Math.min(vg.groundY - 30, p.y));
+      // 宠物可跳起接球：y 下限 120（数值越小跳得越高）
+      p.y = Math.max(120, Math.min(vg.groundY - 30, p.y));
     }
   }
 
@@ -2477,9 +2588,9 @@ function updateVolleyball(dt) {
       }
     }
 
-    // 天花板
-    if (b.y < 30) {
-      b.y = 30;
+    // 天花板（更高）
+    if (b.y < 5) {
+      b.y = 5;
       b.vy = Math.abs(b.vy) * 0.6;
     }
 
@@ -2510,10 +2621,10 @@ function updateVolleyball(dt) {
       vg.state = 'hit';
       vg.rallyCount++;
       playSound('pet');
-      // 计算反弹方向：向对方半场打
+      // 计算反弹方向：向对方半场打，更高更猛
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-200, (targetX - rp.x));
-      const speed = 250 + Math.random() * 80;
+      const angle = Math.atan2(-380, (targetX - rp.x));
+      const speed = 420 + Math.random() * 150;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       // 交换发球方
@@ -2555,7 +2666,7 @@ function updateVolleyball(dt) {
         return;
       }
     }
-    if (b.y < 30) { b.y = 30; b.vy = Math.abs(b.vy) * 0.6; }
+    if (b.y < 5) { b.y = 5; b.vy = Math.abs(b.vy) * 0.6; }
     if (b.x < 15 || b.x > 705) {
       vg.state = 'miss';
       const loser = b.x < vg.netX ? 0 : 1;
@@ -2580,8 +2691,8 @@ function updateVolleyball(dt) {
       vg.rallyCount++;
       playSound('pet');
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-200, (targetX - rp.x));
-      const speed = 280 + Math.random() * 80;
+      const angle = Math.atan2(-380, (targetX - rp.x));
+      const speed = 420 + Math.random() * 150;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       vg.serveSide = receiver;
@@ -2818,10 +2929,10 @@ window.showBattleSelect = function showBattleSelect() {
     const geneStr = (pet.genes||[]).map(gk=>(GENES[gk]||{}).icon||'').join('');
     const restLeft = isResting ? Math.max(0, Math.ceil((pet.restUntil - Date.now())/1000)) : 0;
 
-    html += `<div data-petid="${pet.id}" onclick="toggleBattlePet('${pet.id}')" style="
-      background:#1a1a2e;border:2px solid #444;border-radius:8px;padding:6px;cursor:pointer;text-align:center;
-      min-height:80px;display:flex;flex-direction:column;align-items:center;gap:2px;opacity:${isResting?'0.4':'1'};
-      position:relative;
+    html += `<div data-petid="${pet.id}" style="
+      background:#1a1a2e;border:2px solid #444;border-radius:8px;padding:10px 6px;cursor:pointer;text-align:center;
+      min-height:90px;display:flex;flex-direction:column;align-items:center;gap:3px;opacity:${isResting?'0.4':'1'};
+      position:relative;transition:background 0.15s,border-color 0.15s;
     ">
       <span style="font-size:12px;font-weight:bold;color:#fff">${pet.name}</span>
       <span style="font-size:9px;color:#aaa">${pet.star}★ Lv${pet.level}</span>
@@ -2850,6 +2961,9 @@ window.showBattleSelect = function showBattleSelect() {
   // 按钮
   html += '<div style="display:flex;gap:8px;justify-content:center;">';
   html += '<button id="battleStartBtn" onclick="startBattle()" disabled style="background:#333;border:2px solid #555;color:#555;padding:10px 20px;font-family:monospace;font-size:13px;cursor:not-allowed">开始战斗</button>';
+  html += '<div style="text-align:center;margin-top:8px;font-size:11px;color:#aaa">';
+  html += '<label style="cursor:pointer"><input type="checkbox" id="autoBattleCheck" style="margin-right:4px">自动战斗（宠物自动出招）</label>';
+  html += '</div>';
   html += '<button onclick="cancelBattle()" style="background:#333;border:2px solid #666;color:#fff;padding:10px 20px;font-family:monospace;font-size:13px;cursor:pointer">返回</button>';
   html += '</div>';
 
@@ -2863,6 +2977,23 @@ window.showBattleSelect = function showBattleSelect() {
   if (battleState && battleState.preselected) {
     battleState.preselected.forEach(id => toggleBattlePet(id, true));
     battleState.preselected = null;
+  }
+
+  // 点击委托：通过 data-petid 精准定位被点击的卡片
+  const grid = document.getElementById('battlePetGrid');
+  if (grid) {
+    // 清除旧监听器（防止重复注册）
+    const oldHandler = grid._clickHandler;
+    if (oldHandler) grid.removeEventListener('click', oldHandler);
+    const handler = (e) => {
+      const card = e.target.closest('[data-petid]');
+      if (card) {
+        const petId = card.getAttribute('data-petid');
+        if (petId) toggleBattlePet(petId);
+      }
+    };
+    grid.addEventListener('click', handler);
+    grid._clickHandler = handler;
   }
 
   updateBattleTeamUI();
@@ -2965,7 +3096,7 @@ window.startBattle = function() {
     log: [],              // 战斗日志 [{text, color}]
     winner: null,
     // 动画状态
-    animPhase: 'skillSelect',  // skillSelect | targeting | anim | nextTurn | result
+    animPhase: 'skillSelect',  // skillSelect | targeting | animating | waiting | result
     turnTimer: 0,
     curAttacker: null,
     curSkill: null,
@@ -2974,12 +3105,56 @@ window.startBattle = function() {
     resultMsg: '',
     skillBtns: [],       // [{ skillKey, x, y, w, h }]
     targetBtns: [],      // [{ petId, x, y, w, h }]
+    // 攻击动画状态
+    attackAnim: null,    // { progress, attackerId, targetId, type }
+    autoBattle: false,   // 默认手动模式
   };
+
+  // 读取自动战斗开关（在关闭 overlay 之前）
+  const autoCheck = document.getElementById('autoBattleCheck');
+  battleState.autoBattle = autoCheck ? autoCheck.checked : false;
 
   nextBattleTurn();
   document.getElementById('overlayMsg').style.maxWidth = '360px';
   closeOverlay();
   g.interactGame = 'battle';
+}
+
+function autoSelectAction() {
+  const attacker = battleState.curAttacker;
+  if (!attacker) return false;
+
+  // 自动选技能：残血且不是唯一存活 → 治愈；否则元素技能优先；兜底撞击
+  const skills = getPetSkills(attacker);
+  const teamMates = battleState.teamAPetIds.has(attacker.id)
+    ? battleState.teamA : battleState.teamB;
+  const aliveMates = teamMates.filter(p => p.hp > 0);
+  const lowHp = attacker.hp / attacker.maxHp < 0.3;
+  const notLast = aliveMates.length > 1;
+
+  let skill;
+  if (lowHp && notLast) {
+    skill = skills.find(s => s.type === 'heal');
+  }
+  if (!skill) {
+    skill = skills.find(s => s.type === 'attack' && s.element);
+  }
+  if (!skill) {
+    skill = skills.find(s => s.key === 'tackle');
+  }
+  if (!skill) skill = skills[0];
+  battleState.curSkill = skill;
+
+  // 自动选目标：对方队伍中 HP 比例最低的存活宠物
+  const opponents = battleState.teamAPetIds.has(attacker.id)
+    ? battleState.teamB : battleState.teamA;
+  const aliveOpponents = opponents.filter(p => p.hp > 0);
+  if (aliveOpponents.length === 0) return false;
+
+  aliveOpponents.sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp));
+  battleState.curTarget = aliveOpponents[0];
+
+  return true;
 }
 
 function nextBattleTurn() {
@@ -2999,8 +3174,14 @@ function nextBattleTurn() {
       battleState.curAttacker = pet;
       battleState.curSkill = null;
       battleState.curTarget = null;
-      battleState.animPhase = 'skillSelect';
-      battleState.turnTimer = 0;
+
+      // 自动选技能 & 目标（仅当自动战斗开启时）
+      if (battleState.autoBattle && autoSelectAction()) {
+        battleState.animPhase = 'animating';
+        battleState.turnTimer = 0;
+        executeBattleAction();
+      }
+      // 否则进入 skillSelect 阶段，等待玩家手动选择
       return;
     }
   }
@@ -3049,6 +3230,12 @@ function executeBattleAction() {
     logText = `${attacker.name} 使用了${skill.name}，回复了 ${healAmt} HP！`;
     logColor = '#4CAF50';
     battleState.damageDisplay = { x: 360, y: 200, text: `+${healAmt}`, color: '#4CAF50', timer: 0 };
+    battleState.attackAnim = {
+      active: true, progress: 0,
+      attackerId: attacker.id, targetId: attacker.id,
+      type: 'heal'
+    };
+    battleState.animPhase = 'animating';
   } else {
     const dmg = calcDamage(skill, attacker, target);
     target.hp = Math.max(0, target.hp - dmg);
@@ -3068,7 +3255,16 @@ function executeBattleAction() {
     battleState.log.unshift({ text: `${target.name} 倒下了！`, color: '#f55' });
   }
 
-  battleState.animPhase = 'waiting';
+  // 启动攻击动画（tackle类冲过去，其他轻微晃动）
+  const isTackle = (skill.key === 'tackle' || !skill.type || skill.type === 'attack');
+  battleState.attackAnim = {
+    active: true,
+    progress: 0,
+    attackerId: attacker.id,
+    targetId: target.id,
+    type: isTackle ? 'tackle' : 'normal'
+  };
+  battleState.animPhase = 'animating';
   battleState.turnTimer = 0;
 }
 
@@ -3136,13 +3332,298 @@ function updateBattle(dt) {
     }
   }
 
+  // 攻击动画进度更新
+  if (battleState.attackAnim && battleState.attackAnim.active) {
+    battleState.attackAnim.progress += dt / 1.0; // 1秒动画
+    if (battleState.attackAnim.progress >= 1.0) {
+      battleState.attackAnim.active = false;
+      battleState.attackAnim = null;
+      battleState.animPhase = 'waiting';
+      battleState.turnTimer = 0;
+    }
+  }
+
   // 等待动画结束后自动切换下一回合
-  if (battleState.animPhase === 'waiting') {
+  if (battleState.animPhase === 'waiting' && (!battleState.attackAnim || !battleState.attackAnim.active)) {
     battleState.turnTimer += dt;
-    if (battleState.turnTimer >= 1.0) {
+    if (battleState.turnTimer >= 0.5) {
       nextBattleTurn();
     }
   }
+}
+
+// ─── 战斗场地渲染辅助 ───
+function drawCatFace(ctx, cx, cy, size) {
+  const r = size / 2;
+  const fs = ctx.fillStyle, fa = ctx.textAlign, fb = ctx.textBaseline;
+
+  // 圆脸（奶油色）
+  ctx.fillStyle = '#f5f0e8';
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.05, r * 0.82, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 头顶毛茸茸效果（用几个小圆叠加）
+  ctx.fillStyle = '#e8e0d5';
+  for (let i = 0; i < 5; i++) {
+    const tx = cx + (i - 2) * r * 0.25;
+    ctx.beginPath();
+    ctx.arc(tx, cy - r * 0.55, r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 圆耳朵
+  ctx.fillStyle = '#f5f0e8';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.55, cy - r * 0.3, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.55, cy - r * 0.3, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  // 内耳（粉色）
+  ctx.fillStyle = '#f0b8c0';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.55, cy - r * 0.3, r * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.55, cy - r * 0.3, r * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 大眼睛（卡哇伊风格：竖椭圆）
+  const eyeY = cy - r * 0.08;
+  const eyeSpacing = r * 0.2;
+
+  // 左眼
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(cx - eyeSpacing, eyeY, r * 0.18, r * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2d2d2d';
+  ctx.beginPath();
+  ctx.ellipse(cx - eyeSpacing + r * 0.02, eyeY + r * 0.03, r * 0.1, r * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx - eyeSpacing - r * 0.05, eyeY - r * 0.07, r * 0.045, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 右眼
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(cx + eyeSpacing, eyeY, r * 0.18, r * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2d2d2d';
+  ctx.beginPath();
+  ctx.ellipse(cx + eyeSpacing + r * 0.02, eyeY + r * 0.03, r * 0.1, r * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx + eyeSpacing - r * 0.05, eyeY - r * 0.07, r * 0.045, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 腮红
+  ctx.fillStyle = 'rgba(255,160,140,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(cx - r * 0.52, cy + r * 0.18, r * 0.18, r * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.52, cy + r * 0.18, r * 0.18, r * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻子（倒三角，粉色）
+  ctx.fillStyle = '#f0a0a8';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + r * 0.2);
+  ctx.lineTo(cx - r * 0.08, cy + r * 0.3);
+  ctx.lineTo(cx + r * 0.08, cy + r * 0.3);
+  ctx.closePath();
+  ctx.fill();
+
+  // 嘴巴（W形状）
+  ctx.strokeStyle = '#c08888';
+  ctx.lineWidth = r * 0.045;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.16, cy + r * 0.38);
+  ctx.quadraticCurveTo(cx - r * 0.08, cy + r * 0.33, cx, cy + r * 0.3);
+  ctx.quadraticCurveTo(cx + r * 0.08, cy + r * 0.33, cx + r * 0.16, cy + r * 0.38);
+  ctx.stroke();
+
+  ctx.fillStyle = fs; ctx.textAlign = fa; ctx.textBaseline = fb;
+}
+
+function drawDogFace(ctx, cx, cy, size) {
+  const r = size / 2;
+  const fs = ctx.fillStyle, fa = ctx.textAlign, fb = ctx.textBaseline;
+
+  // 垂耳朵（棕色，椭圆）
+  ctx.fillStyle = '#c8905a';
+  ctx.beginPath();
+  ctx.ellipse(cx - r * 0.72, cy + r * 0.1, r * 0.32, r * 0.52, -0.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.72, cy + r * 0.1, r * 0.32, r * 0.52, 0.25, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 圆脸（浅棕色）
+  ctx.fillStyle = '#e8c890';
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.08, r * 0.82, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 脸部中央白斑
+  ctx.fillStyle = '#f5e8cc';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.25, r * 0.35, r * 0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 大眼睛（圆形，卡哇伊）
+  const eyeY = cy - r * 0.05;
+  const eyeSpacing = r * 0.2;
+
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx - eyeSpacing, eyeY, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2d2d2d';
+  ctx.beginPath();
+  ctx.arc(cx - eyeSpacing + r * 0.02, eyeY + r * 0.03, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx - eyeSpacing - r * 0.06, eyeY - r * 0.07, r * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx + eyeSpacing, eyeY, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2d2d2d';
+  ctx.beginPath();
+  ctx.arc(cx + eyeSpacing + r * 0.02, eyeY + r * 0.03, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(cx + eyeSpacing - r * 0.06, eyeY - r * 0.07, r * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 腮红
+  ctx.fillStyle = 'rgba(255,150,120,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx - r * 0.52, cy + r * 0.18, r * 0.18, r * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.52, cy + r * 0.18, r * 0.18, r * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 鼻子（椭圆黑色）
+  ctx.fillStyle = '#2d2d2d';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + r * 0.22, r * 0.13, r * 0.09, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 嘴巴
+  ctx.strokeStyle = '#b07040';
+  ctx.lineWidth = r * 0.05;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + r * 0.31);
+  ctx.lineTo(cx, cy + r * 0.38);
+  ctx.stroke();
+
+  // 吐舌
+  ctx.fillStyle = '#e87878';
+  ctx.beginPath();
+  ctx.ellipse(cx + r * 0.08, cy + r * 0.46, r * 0.12, r * 0.09, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = fs; ctx.textAlign = fa; ctx.textBaseline = fb;
+}
+
+function drawGrassArena(ctx, x, y, w, h, teamColor, teamLabel) {
+  // 黑色边框底色
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x, y, w, h);
+
+  // 草地背景
+  ctx.fillStyle = '#1a3a1a';
+  ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
+
+  // 草地纹理（竖线条）
+  ctx.strokeStyle = '#2a5a2a';
+  ctx.lineWidth = 1;
+  for (let gx = x + 10; gx < x + w - 5; gx += 12) {
+    ctx.beginPath();
+    ctx.moveTo(gx, y + 5);
+    ctx.lineTo(gx, y + h - 5);
+    ctx.stroke();
+  }
+  // 草地横线
+  for (let gy = y + 15; gy < y + h - 5; gy += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x + 5, gy);
+    ctx.lineTo(x + w - 5, gy);
+    ctx.stroke();
+  }
+
+  // 边框
+  ctx.strokeStyle = teamColor;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+
+  // 队伍标签
+  ctx.fillStyle = teamColor;
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(teamLabel === 'A' ? '🔵 A队' : '🔴 B队', x + 8, y + 18);
+}
+
+function drawArenaPet(ctx, pet, px, py, isAttacking, isCurrent) {
+  if (!pet || pet.hp <= 0) return;
+  const spriteScale = 1.8; // 比场景 (1.33) 更大，保持同一种像素画风
+  const spriteSize = 48 * spriteScale;
+
+  // 阴影
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(px, py + spriteSize / 2 + 4, spriteSize / 2, spriteSize / 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 渲染宠物精灵（与宠物间完全一致，只是放大）
+  const petCanvas = document.createElement('canvas');
+  petCanvas.width = 48;
+  petCanvas.height = 48;
+  drawPetSprite(petCanvas, pet, g.lastTs / 1000);
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(petCanvas, px - 24 * spriteScale, py - 24 * spriteScale, 48 * spriteScale, 48 * spriteScale);
+  ctx.restore();
+
+  // 当前行动者高亮框
+  if (isCurrent) {
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(px - spriteSize / 2 - 6, py - spriteSize / 2 - 6, spriteSize + 12, spriteSize + 12);
+    ctx.setLineDash([]);
+  }
+
+  // HP条
+  const hpRatio = pet.hp / pet.maxHp;
+  const barW = 56;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(px - barW / 2, py + spriteSize / 2 + 6, barW, 6);
+  ctx.fillStyle = getHpColor(hpRatio);
+  ctx.fillRect(px - barW / 2, py + spriteSize / 2 + 6, Math.round(barW * hpRatio), 6);
+
+  // 名字
+  ctx.fillStyle = '#fff';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(pet.name, px, py + spriteSize / 2 + 16);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
 }
 
 function drawBattle(ctx) {
@@ -3152,9 +3633,87 @@ function drawBattle(ctx) {
   ctx.fillStyle = '#0a0a1a';
   ctx.fillRect(0, 0, LOG_W, LOG_H);
 
+  // ─── 绘制草地方框（对战场地）───
+  // 场地略微上移，给底部日志区腾空间
+  drawGrassArena(ctx, 15, 30, 330, 330, '#64B5F6', 'A');
+  drawGrassArena(ctx, 375, 30, 330, 330, '#EF5350', 'B');
+
+  // ─── 绘制场地中的宠物 ───
+  // 找出当前存活的A队和B队宠物中各一个（当前攻击者）显示在场地中央
+  const curA = battleState.curAttacker && battleState.teamAPetIds.has(battleState.curAttacker.id)
+    ? battleState.curAttacker : battleState.teamA.find(p => p.hp > 0) || null;
+  const curB = battleState.curAttacker && !battleState.teamAPetIds.has(battleState.curAttacker.id)
+    ? battleState.curAttacker : battleState.teamB.find(p => p.hp > 0) || null;
+
+  // 攻击动画进度
+  const anim = battleState.attackAnim;
+  let aPetX = 180, aPetY = 200; // A队宠物在场地中的位置
+  let bPetX = 540, bPetY = 200; // B队宠物在场地中的位置
+  let aAttacking = false, bAttacking = false;
+
+  if (anim && anim.active) {
+    const t = anim.progress;
+    const isATeam = battleState.teamAPetIds.has(anim.attackerId);
+    if (isATeam) {
+      // A队宠物攻击：向右冲
+      if (anim.type === 'tackle') {
+        // 冲刺到对方再回来
+        if (t < 0.4) {
+          aPetX = 180 + (360 - 180) * (t / 0.4); // 向前冲
+        } else if (t < 0.8) {
+          aPetX = 540 - (540 - 180) * ((t - 0.4) / 0.4); // 收回
+        } else {
+          aPetX = 180;
+        }
+        aAttacking = t < 0.5;
+      } else {
+        // 普通攻击：晃动
+        aPetX = 180 + Math.sin(t * Math.PI * 6) * 20 * (1 - t);
+        aAttacking = true;
+      }
+    } else {
+      // B队宠物攻击：向左冲
+      if (anim.type === 'tackle') {
+        if (t < 0.4) {
+          bPetX = 540 - (540 - 180) * (t / 0.4);
+        } else if (t < 0.8) {
+          bPetX = 180 + (540 - 180) * ((t - 0.4) / 0.4);
+        } else {
+          bPetX = 540;
+        }
+        bAttacking = t < 0.5;
+      } else {
+        bPetX = 540 - Math.sin(t * Math.PI * 6) * 20 * (1 - t);
+        bAttacking = true;
+      }
+    }
+  }
+
+  // 在场地上绘制宠物图标
+  if (curA) drawArenaPet(ctx, curA, aPetX, aPetY, aAttacking, battleState.curAttacker && battleState.curAttacker.id === curA.id);
+  if (curB) drawArenaPet(ctx, curB, bPetX, bPetY, bAttacking, battleState.curAttacker && battleState.curAttacker.id === curB.id);
+
+  // 绘制对方目标宠物（受击方显示在场地上）
+  if (battleState.curTarget) {
+    const targetIsA = battleState.teamAPetIds.has(battleState.curTarget.id);
+    const targetPet = battleState.curTarget;
+    // 目标宠物已经在场上显示，这里可以叠加一个瞄准框
+    const tx = targetIsA ? aPetX : bPetX;
+    const ty = targetIsA ? aPetY : bPetY;
+    if (targetPet.hp > 0) {
+      // 受击闪烁效果
+      const flash = anim && anim.active && anim.progress < 0.5 ? Math.sin(anim.progress * Math.PI * 8) > 0 : false;
+      if (flash) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(tx - 32, ty - 32, 64, 64);
+      }
+    }
+  }
+
   // 地面装饰
   ctx.fillStyle = '#1a2a1a';
-  ctx.fillRect(0, 480, LOG_W, LOG_H - 480);
+  ctx.fillRect(0, 400, LOG_W, LOG_H - 400);
   ctx.strokeStyle = '#2a3a2a';
   ctx.lineWidth = 1;
   for (let x = 0; x < LOG_W; x += 40) {
@@ -3177,7 +3736,7 @@ function drawBattle(ctx) {
   ctx.font = '11px monospace';
   ctx.fillText(`第 ${battleState.round} 回合`, 320, 30);
 
-  // 绘制宠物（两侧）
+  // 绘制宠物卡片（两侧小头像）
   const drawPetCard = (pet, x, y, isLeft, isActive) => {
     if (!pet) return;
 
@@ -3241,14 +3800,11 @@ function drawBattle(ctx) {
     }
   };
 
-  // A队（左侧，x=10开始）
+  // A队（左侧小头像）
   battleState.teamA.forEach((pet, i) => {
     drawPetCard(pet, 10, 50 + i * 115, true, battleState.curAttacker && battleState.curAttacker.id === pet.id);
   });
-  // B队（右侧，x=570开始）
-  battleState.teamB.forEach((pet, i) => {
-    drawPetCard(pet, 570, 50 + i * 115, false, battleState.curAttacker && battleState.curAttacker.id === pet.id);
-  });
+  // B队小头像已移除，改为场地显示
 
   // 伤害飘字
   if (battleState.damageDisplay) {
@@ -3265,16 +3821,16 @@ function drawBattle(ctx) {
     ctx.globalAlpha = 1;
   }
 
-  // 战斗日志（右侧）
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(460, 200, 250, 150);
+  // 战斗日志（底部信息区）
+  ctx.fillStyle = 'rgba(15,15,30,0.9)';
+  ctx.fillRect(0, 400, LOG_W, LOG_H - 400);
   ctx.strokeStyle = '#333';
   ctx.lineWidth = 1;
-  ctx.strokeRect(460, 200, 250, 150);
-  battleState.log.forEach((entry, i) => {
+  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(LOG_W, 400); ctx.stroke();
+  battleState.log.slice(0, 6).forEach((entry, i) => {
     ctx.fillStyle = entry.color;
     ctx.font = '11px monospace';
-    ctx.fillText(entry.text, 468, 218 + i * 22);
+    ctx.fillText(entry.text, 16, 420 + i * 20);
   });
 
   // 技能选择UI（底部）
@@ -3298,106 +3854,25 @@ function drawBattle(ctx) {
 }
 
 function drawBattleSkillUI(ctx) {
+  // 自动战斗：底部信息已在 drawBattle 的战斗日志区显示，此处仅显示当前行动状态
   if (battleState.animPhase === 'result') return;
-  if (!battleState.curAttacker) return;
-
+  if (!battleState.curAttacker || !battleState.curSkill || !battleState.curTarget) return;
+  
   const attacker = battleState.curAttacker;
-  const alive = attacker.hp > 0;
-
-  // 底部面板
-  ctx.fillStyle = 'rgba(15,15,30,0.95)';
-  ctx.fillRect(0, 400, LOG_W, LOG_H - 400);
-  ctx.strokeStyle = '#444';
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(LOG_W, 400); ctx.stroke();
-
-  if (battleState.animPhase === 'skillSelect' && alive) {
-    // 显示当前行动宠物
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 13px monospace';
-    ctx.fillText(`${attacker.name} 的回合！选择技能：`, 20, 425);
-
-    const skills = getPetSkills(attacker);
-    battleState.skillBtns = [];
-    skills.forEach((skill, i) => {
-      const sx = 20 + i * 175;
-      const sy = 435;
-      const sw = 165;
-      const sh = 60;
-
-      ctx.fillStyle = skill.type === 'heal' ? '#1a3a1a' : '#1a1a3a';
-      ctx.strokeStyle = '#555';
-      ctx.lineWidth = 2;
-      roundRect(ctx, sx, sy, sw, sh, 6);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#fff';
-      ctx.font = '16px monospace';
-      ctx.fillText(skill.icon, sx + 8, sy + 22);
-      ctx.font = 'bold 12px monospace';
-      ctx.fillText(skill.name, sx + 36, sy + 18);
-      ctx.fillStyle = '#aaa';
-      ctx.font = '10px monospace';
-      ctx.fillText(skill.desc, sx + 36, sy + 34);
-      ctx.fillStyle = skill.type === 'heal' ? '#4CAF50' : '#FF9800';
-      ctx.fillText(skill.type === 'heal' ? `回复30%` : `威力${skill.power}`, sx + 36, sy + 50);
-
-      battleState.skillBtns.push({ skillKey: skill.key, x: sx, y: sy, w: sw, h: sh });
-    });
-  } else if (battleState.animPhase === 'targeting' && battleState.curSkill) {
   const skill = battleState.curSkill;
+  const target = battleState.curTarget;
+  
   ctx.fillStyle = '#FFD700';
-  ctx.font = 'bold 13px monospace';
-  ctx.fillText(`选择目标（${attacker.name} 使用 ${skill.name}）：`, 20, 425);
-
-  // 显示可 targeting 的宠物（对方存活的）
-  const opponents = battleState.turnOrder.filter(p =>
-    p.hp > 0 && p.id !== attacker.id
-  );
-  battleState.targetBtns = [];
-  opponents.forEach((pet, i) => {
-    const sx = 20 + i * 175;
-    const sy = 435;
-    const hpRatio = pet.hp / pet.maxHp;
-    const hpColor = getHpColor(hpRatio);
-
-    ctx.fillStyle = '#1a1a3a';
-    ctx.strokeStyle = '#E53935';
-    ctx.lineWidth = 2;
-    roundRect(ctx, sx, sy, 165, 60, 6);
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px monospace';
-    ctx.fillText(pet.name, sx + 8, sy + 18);
-    ctx.font = '10px monospace';
-    ctx.fillStyle = hpColor;
-    ctx.fillText(`HP ${pet.hp}/${pet.maxHp}`, sx + 8, sy + 36);
-
-      // HP条
-      ctx.fillStyle = '#333';
-      ctx.fillRect(sx + 8, sy + 42, 140, 8);
-      ctx.fillStyle = hpColor;
-      ctx.fillRect(sx + 8, sy + 42, Math.round(140 * hpRatio), 8);
-
-      battleState.targetBtns.push({ petId: pet.id, x: sx, y: sy, w: 165, h: 60 });
-    });
-  } else if (battleState.animPhase === 'animating' || battleState.animPhase === 'waiting') {
-    ctx.fillStyle = '#aaa';
-    ctx.font = '13px monospace';
-    const skill = battleState.curSkill;
-    const target = battleState.curTarget;
-    if (skill && target) {
-      ctx.fillText(`${attacker.name} 对 ${target.name} 使用了 ${skill.name}...`, 20, 425);
-    }
-    // 进度条
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(`${attacker.name} → ${target.name}：${skill.icon} ${skill.name}`, 16, 414);
+  
+  // 进度条（动画期间显示）
+  if (battleState.animPhase === 'animating' || battleState.animPhase === 'waiting') {
     const prog = Math.min(1, battleState.turnTimer / 1.0);
     ctx.fillStyle = '#333';
-    ctx.fillRect(20, 435, 680, 12);
+    ctx.fillRect(16, 418, 200, 8);
     ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(20, 435, Math.round(680 * prog), 12);
+    ctx.fillRect(16, 418, Math.round(200 * prog), 8);
   }
 }
 
