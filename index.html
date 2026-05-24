@@ -23,81 +23,214 @@ body {
   background: #000;
   font-family: monospace;
   color: #fff;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
+
+/* ─── 顶部导航栏 ─── */
+#topBar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  flex-shrink: 0;
+  background: #0a0a0a;
+  border-bottom: 2px solid #333;
+  padding: 0 10px;
+  z-index: 10;
+  gap: 8px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#topBar .navBtn {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.8);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+#topBar .navBtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.5); }
+#topBar .navBtn:active { transform: scale(0.95); }
+#topSceneTitle {
+  flex: 1;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  color: #ccc;
+  letter-spacing: 1px;
+}
+#topShopBtn {
+  background: rgba(30,30,30,0.9);
+  border: 1px solid #FFD700;
+  color: #FFD700;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+#topShopBtn:hover { background: rgba(60,50,10,0.95); }
+#topSettingsBtn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  font-size: 16px;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+#topSettingsBtn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.1); }
+
+/* ─── 主容器 ─── */
 #wrap {
   position: relative;
-  width: 100vw;
-  height: 100vh;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  padding: 4px 0;
+  min-height: 0;
 }
+
+/* ─── Canvas ─── */
 #c {
-  border: 4px solid #444;
+  border: 3px solid #444;
   background: #0a0a0a;
-  /* JS 动态控制尺寸，保持像素级放大 */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   -ms-interpolation-mode: nearest-neighbor;
   position: relative;
   z-index: 1;
+  flex-shrink: 0;
 }
+
+/* ─── 按钮栏（单行流式布局） ─── */
 #btns {
   display: flex;
-  gap: 6px;
   flex-wrap: wrap;
   justify-content: center;
-  padding: 4px 8px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 4px 8px;
   max-width: 100%;
+  flex-shrink: 0;
 }
+
 .bt {
   background: #222;
-  border: 3px solid #555;
+  border: 2px solid #555;
   color: #fff;
-  padding: 8px 10px;
+  padding: 5px 8px;
   font-family: monospace;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
-  min-width: 70px;
-  min-height: 44px;
+  min-width: 60px;
+  min-height: 36px;
   text-align: center;
-  flex: 1 0 auto;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
+  border-radius: 4px;
+  transition: background 0.1s, border-color 0.1s, transform 0.08s;
 }
 .bt:hover { background: #333; border-color: #888; }
 .bt:active { background: #444; transform: scale(0.96); }
 .bt.off { border-color: #f55; color: #faa; }
-.bt .cooldown { color: #888; font-size: 11px; }
+.bt .cooldown { color: #888; font-size: 10px; }
+
+/* 分组分隔符 */
+.btnSep {
+  width: 1px;
+  height: 24px;
+  background: #444;
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+/* 文字指令行（内联在按钮流中） */
+.cmdInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+#voiceTextInput {
+  height: 28px;
+  width: 110px;
+  background: rgba(30,30,30,0.85);
+  border: 1px solid #555;
+  color: #fff;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 0 8px;
+  border-radius: 4px;
+  outline: none;
+}
+#voiceTextInput:focus { border-color: #888; }
+#cmdSendBtn {
+  width: 26px;
+  height: 28px;
+  background: rgba(30,30,30,0.85);
+  border: 1px solid #555;
+  color: #fff;
+  font-family: monospace;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#cmdSendBtn:hover { background: #333; border-color: #888; }
+
 /* 道具按钮悬停 */
 #overlay button:not([disabled]):hover { background: #333 !important; border-color: #888 !important; }
 #overlay button:active { background: #444 !important; transform: scale(0.96); }
-/* 商店按钮 */
-#shopBtn { position:fixed; top:8px; right:8px; z-index:20; background:rgba(30,30,30,0.9); border:2px solid #FFD700; color:#FFD700; font-family:monospace; font-size:13px; padding:7px 14px; cursor:pointer; border-radius:4px; }
-#shopBtn:hover { background:rgba(60,50,10,0.95); }
+
 /* 道具瞄准模式 */
 #toolAimHint { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:20; background:rgba(0,0,0,0.8); color:#fff; font-family:monospace; font-size:12px; padding:6px 16px; border-radius:4px; display:none; pointer-events:none; }
 #toolCancelBtn { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); z-index:20; background:rgba(80,30,30,0.9); border:2px solid #f55; color:#fff; font-family:monospace; font-size:12px; padding:6px 16px; cursor:pointer; border-radius:4px; display:none; }
-/* 场景切换固定图标按钮 */
-.sceneNavBtn { width:44px; height:44px; border-radius:50%; background:rgba(0,0,0,0.7); border:2px solid rgba(255,255,255,0.4); color:rgba(255,255,255,0.85); font-size:20px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.15s, border-color 0.15s, transform 0.1s; user-select:none; pointer-events:auto; }
-.sceneNavBtn:hover { background:rgba(60,60,60,0.85); border-color:rgba(255,255,255,0.8); transform:scale(1.08); }
-.sceneNavBtn:active { transform:scale(0.95); }
-#sceneNavLeft { position:fixed; left:10px; top:50%; transform:translateY(-50%); z-index:20; pointer-events:auto; }
-#sceneNavRight { position:fixed; right:10px; top:50%; transform:translateY(-50%); z-index:20; pointer-events:auto; }
+
 @media (max-width: 500px) {
   .bt {
-    min-width: 60px;
-    min-height: 48px;
-    padding: 6px 8px;
-    font-size: 12px;
+    min-width: 54px;
+    min-height: 40px;
+    padding: 4px 6px;
+    font-size: 11px;
   }
-  .bt .cooldown { font-size: 10px; }
+  .bt .cooldown { font-size: 9px; }
+  #voiceTextInput { width: 100px; }
+  #topBar { height: 40px; }
+  #topSceneTitle { font-size: 13px; }
 }
+
+/* ─── Overlay ─── */
 #overlay {
   display: none;
   position: fixed;
@@ -124,58 +257,97 @@ body {
 #overlay .msg .title { font-size: 16px; color: #FFD700; margin-bottom: 8px; }
 #overlay .msg .pet { font-size: 18px; color: #FF69B4; margin: 8px 0; }
 #overlay button { padding: 10px 24px; font-family: monospace; font-size: 14px; min-height: 44px; }
+
+/* ─── 事件/Toast 提示 ─── */
 #evt {
   position: fixed;
-  top: max(env(safe-area-inset-top), 20px);
+  top: max(env(safe-area-inset-top, 0px) + 52px, 52px);
   left: 50%;
   transform: translateX(-50%);
   background: #1a1a2e;
   border: 2px solid #FFD700;
-  padding: 8px 16px;
+  padding: 6px 14px;
   font-size: 13px;
   display: none;
   z-index: 20;
   text-align: center;
   max-width: min(300px, calc(100vw - 32px));
+  border-radius: 4px;
 }
 #evt.show { display: block; }
+
+/* ─── 互动/退出按钮 ─── */
+#exitInteractBtn {
+  display: none;
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: rgba(30,30,30,0.9);
+  border: 2px solid #f55;
+  color: #fff;
+  font-family: monospace;
+  font-size: 13px;
+  padding: 7px 18px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+#exitInteractBtn:hover { background: rgba(60,30,30,0.95) !important; }
 </style>
 </head>
 <body>
-<!-- 场景切换固定图标 -->
-<button id="sceneNavLeft" class="sceneNavBtn" title="切换场景" onclick="toggleScene()">◀</button>
-<button id="sceneNavRight" class="sceneNavBtn" title="切换场景" onclick="toggleScene()">▶</button>
+<!-- 顶部导航栏（替代旧版悬浮箭头 + 商店按钮） -->
+<div id="topBar">
+  <button class="navBtn" id="topNavLeft" onclick="toggleScene()" title="切换场景">◀</button>
+  <span id="topSceneTitle">🥚 孵蛋室</span>
+  <button class="navBtn" id="topNavRight" onclick="toggleScene()" title="切换场景">▶</button>
+  <button id="topSettingsBtn" onclick="showSettings()" title="设置">⚙️</button>
+  <button id="topShopBtn" onclick="openShop()">🛒 商店</button>
+</div>
+
 <div id="wrap">
   <canvas id="c"></canvas>
   <div id="btns">
+    <!-- 环境 -->
     <button class="bt" id="btnHeat" onclick="toggleHeat()">🔥 加热<br><span class="cooldown" id="heatStatus">开启</span></button>
     <button class="bt" id="btnIce" onclick="toggleIce()">🧊 冰袋<br><span class="cooldown" id="iceStatus">可用</span></button>
+    <div class="btnSep"></div>
+    <!-- 操作 -->
     <button class="bt" id="btnPet" onclick="doPet()" style="display:none">🫂 抚摸<br><span class="cooldown" id="petCd">可用</span></button>
     <button class="bt" id="btnFeed" onclick="showFeedSelect()" style="display:none">🍖 喂食<br><span class="cooldown" id="feedStatus">可用</span></button>
     <button class="bt" id="btnForage" onclick="doForage()">🔍 找食物<br><span class="cooldown" id="forageCd">可用</span></button>
     <button class="bt" id="btnBreed" onclick="doSynthesize()">⚗️ 合成<br><span class="cooldown" id="breedStatus">可用</span></button>
-    <button class="bt" onclick="showAlbum()">📖 图鉴</button>
-    <button class="bt" onclick="resetGame()">🔄 重开</button>
-    <button class="bt" id="btnFlip" onclick="toggleCanvasFlip()">🔲 翻转</button>
     <button class="bt" id="btnInteract" onclick="showInteractSelect()">🎮 互动<br><span class="cooldown" id="interactStatus">可用</span></button>
-    <button class="bt" id="btnVoice" onclick="startVoiceCommand()">🎤 喊话<br><span class="cooldown" id="voiceStatus">可用</span></button>
-    <!-- 文字指令输入框 -->
-    <input type="text" id="voiceTextInput" placeholder="输入指令..." onkeydown="if(event.key==='Enter')executeTextCommand()" style="position:fixed;top:68px;right:18px;width:120px;height:28px;background:rgba(30,30,30,0.85);border:1px solid #555;color:#fff;font-family:monospace;font-size:12px;padding:0 8px;border-radius:4px;outline:none;z-index:15;" />
-    <button onclick="executeTextCommand()" style="position:fixed;top:68px;right:148px;width:26px;height:28px;background:rgba(30,30,30,0.85);border:1px solid #555;color:#fff;font-family:monospace;font-size:12px;cursor:pointer;border-radius:4px;z-index:15;padding:0;">▶</button>
     <button class="bt" onclick="showToolSelect()">🧰 道具</button>
+    <div class="btnSep"></div>
+    <!-- 工具 -->
+    <button class="bt" onclick="showAlbum()">📖 图鉴</button>
+    <button class="bt" id="btnFlip" onclick="toggleCanvasFlip()">🔲 翻转</button>
+    <button class="bt" id="btnVoice" onclick="startVoiceCommand()">🎤 喊话<br><span class="cooldown" id="voiceStatus">可用</span></button>
+    <div class="btnSep"></div>
+    <!-- 文字指令 -->
+    <span class="cmdInline">
+      <input type="text" id="voiceTextInput" placeholder="指令..." onkeydown="if(event.key==='Enter')executeTextCommand()" />
+      <button id="cmdSendBtn" onclick="executeTextCommand()">▶</button>
+    </span>
   </div>
 </div>
+
 <div id="evt"></div>
+
 <div id="overlay">
   <div class="msg" id="overlayMsg"></div>
   <button onclick="closeOverlay()">确定</button>
 </div>
+
 <!-- 互动模式退出按钮 -->
-<div id="exitInteractBtn" style="display:none;position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:20;background:rgba(30,30,30,0.9);border:2px solid #f55;color:#fff;font-family:monospace;font-size:13px;padding:7px 18px;cursor:pointer;border-radius:4px;" onclick="exitInteractMode()" onmouseover="this.style.background='rgba(60,30,30,0.95)'" onmouseout="this.style.background='rgba(30,30,30,0.9)'">🚪 结束互动</div>
-<!-- 商店按钮 -->
-<button id="shopBtn" onclick="openShop()">🛒 商店</button>
-<!-- 道具瞄准取消 -->
+<div id="exitInteractBtn" onclick="exitInteractMode()">🚪 结束互动</div>
+
+<!-- 道具瞄准取消 + 提示 -->
 <button id="toolCancelBtn" onclick="cancelToolMode()">✕ 取消道具</button>
 <div id="toolAimHint"></div>
+
 <script type="module" src="src/main.js"></script>
+</body>
 </html>
