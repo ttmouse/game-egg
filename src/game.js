@@ -2568,10 +2568,10 @@ function predictBallAt(ball, t, gravity, netX, netTop, groundY) {
     vy += gravity * dt;
     x += vx * dt;
     y += vy * dt;
-    // 天花板
-    if (y < 30) { y = 30; vy = Math.abs(vy) * 0.6; }
-    // 地面
-    if (y > groundY - 12) { y = groundY - 12; vy = -Math.abs(vy) * 0.65; vx *= 0.75; }
+    // 天花板（统一为 y<5）
+    if (y < 5) { y = 5; vy = Math.abs(vy) * 0.6; }
+    // 地面（适当增强弹性让回合更长）
+    if (y > groundY - 12) { y = groundY - 12; vy = -Math.abs(vy) * 0.70; vx *= 0.80; }
     // 出界
     if (x < 15 || x > 705) break;
     // 触网
@@ -2688,13 +2688,13 @@ function updateVolleyball(dt) {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
 
-    // 地面反弹
+    // 地面反弹（增强弹性让回合更长）
     if (b.y >= vg.groundY - 12) {
       b.y = vg.groundY - 12;
-      b.vy = -Math.abs(b.vy) * 0.65;
-      b.vx *= 0.75;
+      b.vy = -Math.abs(b.vy) * 0.70;
+      b.vx *= 0.80;
       playSound('pet');
-      if (Math.abs(b.vy) < 60) {
+      if (Math.abs(b.vy) < 50) {
         // 球停了，对方得分
         vg.state = 'miss';
         const loser = b.x < vg.netX ? 0 : 1;
@@ -2725,21 +2725,22 @@ function updateVolleyball(dt) {
       return;
     }
 
-    // 对方宠物接球检测
+    // 对方宠物接球检测（放宽条件提高可玩性）
     const receiver = 1 - vg.serveSide;
     const rp = vg.pos[receiver];
     const dx = b.x - rp.x;
     const dy = b.y - (rp.y - 15);
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 38 && b.vy > -50) {
+    // 扩大接球范围 38->48，放宽速度条件允许接更高的球
+    if (dist < 48 && b.vy > -150) {
       // 接住了！反弹回去
       vg.state = 'hit';
       vg.rallyCount++;
       playSound('pet');
       // 计算反弹方向：向对方半场打，更高更猛
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-380, (targetX - rp.x));
-      const speed = 420 + Math.random() * 150;
+      const angle = Math.atan2(-420, (targetX - rp.x));
+      const speed = 480 + Math.random() * 180;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       // 交换发球方
@@ -2748,7 +2749,7 @@ function updateVolleyball(dt) {
       // 设定接球目标为发球方（接完球要去接下一次）
       vg.catchTarget = [null, null];
       vg.catchTarget[vg.serveSide] = { x: vg.serveSide === 0 ? 120 : 600, y: 400 };
-      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 380 + Math.random() * 60 };
+      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 320 + Math.random() * 80 };
     }
 
     // 自己接自己的球？（漏接）
@@ -2757,7 +2758,7 @@ function updateVolleyball(dt) {
     const sdx = b.x - sp.x;
     const sdy = b.y - (sp.y - 15);
     const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
-    if (sdist < 38 && b.vy > -50 && vg.rallyCount === 0) {
+    if (sdist < 48 && b.vy > -150 && vg.rallyCount === 0) {
       // 发球失误，直接丢分
       vg.state = 'miss';
       setTimeout(() => scorePointVolley(1 - server), 800);
@@ -2771,10 +2772,10 @@ function updateVolleyball(dt) {
 
     if (b.y >= vg.groundY - 12) {
       b.y = vg.groundY - 12;
-      b.vy = -Math.abs(b.vy) * 0.65;
-      b.vx *= 0.75;
+      b.vy = -Math.abs(b.vy) * 0.70;
+      b.vx *= 0.80;
       playSound('pet');
-      if (Math.abs(b.vy) < 60) {
+      if (Math.abs(b.vy) < 50) {
         vg.state = 'miss';
         const loser = b.x < vg.netX ? 0 : 1;
         setTimeout(() => scorePointVolley(1 - loser), 800);
@@ -2795,25 +2796,25 @@ function updateVolleyball(dt) {
       return;
     }
 
-    // 接球检测
+    // 接球检测（放宽条件提高可玩性）
     const receiver = 1 - vg.serveSide;
     const rp = vg.pos[receiver];
     const dx = b.x - rp.x;
     const dy = b.y - (rp.y - 15);
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < 38 && b.vy > -50) {
+    if (dist < 48 && b.vy > -150) {
       vg.state = 'hit';
       vg.rallyCount++;
       playSound('pet');
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-380, (targetX - rp.x));
-      const speed = 420 + Math.random() * 150;
+      const angle = Math.atan2(-420, (targetX - rp.x));
+      const speed = 480 + Math.random() * 180;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       vg.serveSide = receiver;
       vg.catchTarget = [null, null];
       vg.catchTarget[vg.serveSide] = { x: vg.serveSide === 0 ? 120 : 600, y: 400 };
-      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 380 + Math.random() * 60 };
+      vg.catchTarget[1 - vg.serveSide] = { x: vg.serveSide === 0 ? 550 : 170, y: 320 + Math.random() * 80 };
     }
   }
 }
@@ -2897,13 +2898,13 @@ function drawVolleyballGame(ctx) {
     ctx.fillText(`拖动球发球 →`, vg.pos[server].x - 50, vg.pos[server].y - 65);
   }
 
-  // 拖拽预览轨迹
+  // 拖拽预览轨迹（修正为与发球一致的方向）
   if (vg.dragStart && vg.dragEnd && vg.state === 'serve') {
     const ds = vg.dragStart;
     const de = vg.dragEnd;
     const dx = de.x - ds.x;
     const dy = de.y - ds.y;
-    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 2.5, 500);
+    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 4.0, 650);
     const angle = Math.atan2(dy, dx);
 
     // 预测轨迹点
@@ -2913,9 +2914,9 @@ function drawVolleyballGame(ctx) {
     ctx.beginPath();
     let px = vg.ball.x, py = vg.ball.y;
     let pvx = Math.cos(angle) * power;
-    let pvy = Math.sin(angle) * power;
+    let pvy = -Math.sin(angle) * power; // negate让向下拖拽的预览向上飞
     ctx.moveTo(px, py);
-    for (let t = 0; t < 40; t++) {
+    for (let t = 0; t < 50; t++) {
       pvy += vg.gravity * 0.03;
       px += pvx * 0.03;
       py += pvy * 0.03;
@@ -2999,15 +3000,22 @@ function onVolleyDragEnd() {
   if (ds && de) {
     const dx = de.x - ds.x;
     const dy = de.y - ds.y;
-    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 2.5, 500);
+    // 改进发球力度：增加系数和最大速度，支持打出更高的球
+    const power = Math.min(Math.sqrt(dx * dx + dy * dy) * 4.0, 650);
     const angle = Math.atan2(dy, dx);
     vg.ball.vx = Math.cos(angle) * power;
-    vg.ball.vy = Math.sin(angle) * power;
+    // 修复：拖拽向下(dy>0)时应该让球向上飞，negate vy
+    vg.ball.vy = -Math.sin(angle) * power;
     vg.state = 'fly';
     // 设定接球目标
     const receiver = 1 - vg.serveSide;
     vg.catchTarget = [null, null];
-    vg.catchTarget[receiver] = { x: receiver === 0 ? 200 + Math.random() * 200 : 320 + Math.random() * 200, y: 380 + Math.random() * 60 };
+    // 接收方预判接球位置，根据发球方向调整
+    const serverX = vg.serveSide === 0 ? 120 : 600;
+    const targetX = vg.serveSide === 0 ? (320 + Math.random() * 200) : (200 + Math.random() * 200);
+    vg.catchTarget[receiver] = { x: targetX, y: 300 + Math.random() * 100 };
+    // 发球方也要往网前移动准备
+    vg.catchTarget[vg.serveSide] = { x: serverX, y: 400 };
     playSound('pet');
   }
   vg.ball.dragging = false;
