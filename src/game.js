@@ -1766,9 +1766,9 @@ window.showInteractSelect = function() {
   const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(g.pets.length))));
   html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;max-height:300px;overflow-y:auto;padding:4px;">`;
 
-  g.pets.forEach((pet) => {
+  g.pets.forEach((pet, i) => {
     const geneStr = (pet.genes || []).map(gk => (GENES[gk] || {}).icon || '').join('');
-    html += `<div id="ivt_pet_${pet.id}" onclick="toggleInteractPet('${pet.id}')" style="
+    html += `<div id="ivt_pet_${i}" onclick="toggleInteractPet(${i})" style="
       background:#1a1a2e;border:2px solid #555;border-radius:8px;padding:10px 6px;cursor:pointer;text-align:center;
       display:flex;flex-direction:column;align-items:center;gap:3px;min-height:80px;
       transition:background 0.15s,border-color 0.15s;
@@ -1794,17 +1794,17 @@ window.showInteractSelect = function() {
 };
 
 
-window.toggleInteractPet = function(petId) {
-  const idx = selectedInteractPets.indexOf(petId);
-  if (idx >= 0) {
-    selectedInteractPets.splice(idx, 1);
+window.toggleInteractPet = function(idx) {
+  const pos = selectedInteractPets.indexOf(idx);
+  if (pos >= 0) {
+    selectedInteractPets.splice(pos, 1);
   } else {
-    selectedInteractPets.push(petId);
+    selectedInteractPets.push(idx);
   }
-  const btn = document.getElementById('ivt_pet_' + petId);
+  const btn = document.getElementById('ivt_pet_' + idx);
   if (btn) {
-    btn.style.background = selectedInteractPets.indexOf(petId) >= 0 ? '#1a3a1a' : '#222';
-    btn.style.borderColor = selectedInteractPets.indexOf(petId) >= 0 ? '#4CAF50' : '#555';
+    btn.style.background = selectedInteractPets.indexOf(idx) >= 0 ? '#1a3a1a' : '#222';
+    btn.style.borderColor = selectedInteractPets.indexOf(idx) >= 0 ? '#4CAF50' : '#555';
   }
   const hint = document.getElementById('ivt_hint');
   if (hint) hint.textContent = `已选择 ${selectedInteractPets.length} 只`;
@@ -1820,8 +1820,8 @@ function showGameSelect() {
   if (selectedInteractPets.length === 0) return;
   initAudio();
 
-  const petNames = selectedInteractPets.map(id => {
-    const pet = g.pets.find(p => p.id === id);
+  const petNames = selectedInteractPets.map(idx => {
+    const pet = g.pets[idx];
     return pet ? pet.name : '';
   }).join('、');
 
@@ -2294,7 +2294,7 @@ window.startBallGame = function() {
   initAudio();
   playSound('pet');
 
-  const pet = g.pets.find(p => p.id === selectedInteractPets[0]);
+  const pet = g.pets[selectedInteractPets[0]];
   if (!pet) return;
   // 找宠物当前位置作为起点
   const petX = pet.scenePos ? pet.scenePos.x : 360;
@@ -2560,8 +2560,8 @@ window.startVolleyballGame = function() {
   initAudio();
   playSound('pet');
 
-  const pet1 = g.pets.find(p => p.id === selectedInteractPets[0]);
-  const pet2 = g.pets.find(p => p.id === selectedInteractPets[1]);
+  const pet1 = g.pets[selectedInteractPets[0]];
+  const pet2 = g.pets[selectedInteractPets[1]];
   if (!pet1 || !pet2) return;
 
   volleyGame = {
