@@ -245,11 +245,11 @@ function drawHUD() {
   // ── 列对齐常量（两行共享） ──
   const C_TIME = 8;     // 时间 / 📅天
   const C_ICON = 84;    // 🥚 / 🍖
-  const C_BAR  = 106;   // 进度条（宽 68，紧贴 🥚 之后）
+  const C_BAR  = 106;   // 进度条（宽 70，紧贴 🥚 之后）
   const C_PCT  = 180;   // % / 数字（紧贴进度条之后）
-  const C_TEMP = 230;   // 🌡温度（与 G2 组之间有明显间距）
-  const C_POW  = 300;   // ⚡电量
-  const C_PETS = 360;   // 🐾宠物数
+  const C_TEMP = 265;   // 🌡温度（与 G2 组大间距～60px）
+  const C_POW  = 345;   // ⚡电量（与 🌡 间距～35px）
+  const C_PETS = 415;   // 🐾宠物数（与 ⚡ 间距～30px）
   const C_HEAT = 615;   // 孵化状态（靠右）
 
   // ── 第一行 ──
@@ -264,9 +264,9 @@ function drawHUD() {
   else if (g.temp >= 30) hatchBarClr = '#FFC107';
   drawIcn('🥚', C_ICON, Y1, '#aaa', 1.1);
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(C_BAR, Y1 + 4, 60, 8);
+  ctx.fillRect(C_BAR, Y1 + 4, 70, 8);
   ctx.fillStyle = hatchBarClr;
-  ctx.fillRect(C_BAR, Y1 + 4, Math.floor(60 * g.hatchPct / 100), 8);
+  ctx.fillRect(C_BAR, Y1 + 4, Math.floor(70 * g.hatchPct / 100), 8);
   drawIcn(`${Math.floor(g.hatchPct)}%`, C_PCT, Y1, hatchBarClr, 1.0);
 
   const inOpt = g.temp >= TEMP_OPT_MIN && g.temp <= TEMP_OPT_MAX;
@@ -305,9 +305,9 @@ function drawHUD() {
     const hungerColor = g.hunger < 30 ? P.danger : (g.hunger < 60 ? P.warn : '#4CAF50');
     drawIcn('🍖', C_ICON, Y2, '#aaa', 1.1);
     ctx.fillStyle = P.barBg;
-    ctx.fillRect(C_BAR, Y2 + 4, 60, 8);
+    ctx.fillRect(C_BAR, Y2 + 4, 70, 8);
     ctx.fillStyle = hungerColor;
-    ctx.fillRect(C_BAR, Y2 + 4, Math.floor(60 * g.hunger / 100), 8);
+    ctx.fillRect(C_BAR, Y2 + 4, Math.floor(70 * g.hunger / 100), 8);
     drawIcn(`${Math.floor(g.hunger)}`, C_PCT, Y2, hungerColor, 1.0);
   }
 }

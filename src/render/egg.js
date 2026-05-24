@@ -1,6 +1,6 @@
 import { ctx, canvas } from '../canvas.js';
 import { g, petSpriteCache, saveGame } from '../state.js';
-import { P, STAR_COLORS, GENES, EXP_TABLE } from '../config.js';
+import { P, STAR_COLORS, GENES, EXP_TABLE, TEMP_OPT_MAX } from '../config.js';
 import { drawIsoGround } from './ground.js';
 import { drawText, drawTextToCtx } from '../utils.js';
 
@@ -88,10 +88,21 @@ export function drawEgg() {
       ctx.fillRect(ex - w, ey + py, w * 2, 1);
     }
     ctx.globalAlpha = 0.7;
-    drawText(`等待第${g.nextHatchDay}天`, ex - 75, ey + eggH / 2 + 15, P.warn, 2);
-    drawText(`(${daysLeft}天后)`, ex - 64, ey + eggH / 2 + 35, P.dim, 2);
+    drawText(`等待第${g.nextHatchDay}天`, ex - 75, ey + eggH / 2 + 35, P.warn, 2);
+    drawText(`(${daysLeft}天后)`, ex - 64, ey + eggH / 2 + 55, P.dim, 2);
     ctx.globalAlpha = 1;
     return;
+  }
+
+  // 孵化光晕（按温度）
+  if (g.incubating) {
+    const glow = (Math.sin(Date.now() / 500) + 1) * 0.12;
+    ctx.fillStyle = `rgba(255, 200, 100, ${glow})`;
+    ctx.fillRect(ex - eggW/2 - 8, ey - eggH/2 - 10, eggW + 16, eggH + 20);
+  } else if (g.temp > TEMP_OPT_MAX) {
+    const glow = (Math.sin(Date.now() / 300) + 1) * 0.08;
+    ctx.fillStyle = `rgba(255, 50, 50, ${glow})`;
+    ctx.fillRect(ex - eggW/2 - 8, ey - eggH/2 - 10, eggW + 16, eggH + 20);
   }
 
   const stage = Math.floor(g.hatchPct / 20);
@@ -165,11 +176,11 @@ export function drawEgg() {
     ctx.fillRect(ex, ey, 2, 2);
   }
 
-  drawText(`孵化 ${Math.floor(g.hatchPct)}%`, ex - 50, ey + eggH / 2 + 8, P.dim, 1.5);
+  drawText(`孵化 ${Math.floor(g.hatchPct)}%`, ex - 50, ey + eggH / 2 + 35, P.dim, 1.5);
   ctx.fillStyle = P.barBg;
-  ctx.fillRect(ex - 40, ey + eggH / 2 + 28, 80, 6);
+  ctx.fillRect(ex - 40, ey + eggH / 2 + 52, 80, 6);
   ctx.fillStyle = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
-  ctx.fillRect(ex - 40, ey + eggH / 2 + 28, Math.floor(80 * g.hatchPct / 100), 6);
+  ctx.fillRect(ex - 40, ey + eggH / 2 + 52, Math.floor(80 * g.hatchPct / 100), 6);
 }
 
 export function drawEggToCtx(targetCtx) {
@@ -177,7 +188,8 @@ export function drawEggToCtx(targetCtx) {
   const eggW = 60, eggH = 82;
   if (g.dayCount < g.nextHatchDay) {
     const daysLeft = g.nextHatchDay - g.dayCount;
-    drawTextToCtx(targetCtx, ex - 64, ey + eggH / 2 + 30, `等待第${g.nextHatchDay}天`, P.dim, 2);
+    drawTextToCtx(targetCtx, ex - 64, ey + eggH / 2 + 35, `等待第${g.nextHatchDay}天`, P.dim, 2);
+    if (daysLeft > 0) drawTextToCtx(targetCtx, ex - 64, ey + eggH / 2 + 55, `还剩${daysLeft}天`, P.dim, 2);
     return;
   }
   const stage = Math.floor(g.hatchPct / 20);
@@ -219,14 +231,11 @@ export function drawEggToCtx(targetCtx) {
     targetCtx.fillRect(ex - 14, ey - 10, 28, 32);
   }
   targetCtx.fillStyle = P.barBg;
-  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 8, 80, 6);
+  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 52, 80, 6);
   targetCtx.fillStyle = g.hatchPct > 80 ? P.happy : (g.hatchPct > 50 ? P.warn : '#aaa');
-  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 8, Math.floor(80 * g.hatchPct / 100), 6);
-  drawTextToCtx(targetCtx, ex - 50, ey + eggH / 2 + 20, `孵化 ${Math.floor(g.hatchPct)}%`, P.dim, 1.5);
-  if (g.nextHatchDay > 0) {
-    const daysLeft = g.nextHatchDay - g.dayCount;
-    if (daysLeft > 0) drawTextToCtx(targetCtx, ex - 75, ey + eggH / 2 + 40, `还剩${daysLeft}天`, P.warn, 2);
-  }
+  targetCtx.fillRect(ex - 40, ey + eggH / 2 + 52, Math.floor(80 * g.hatchPct / 100), 6);
+  drawTextToCtx(targetCtx, ex - 50, ey + eggH / 2 + 35, `孵化 ${Math.floor(g.hatchPct)}%`, P.dim, 1.5);
+  // daysLeft 已在上方等待分支处理，此路径不会走到
 }
 
 export function drawHatchingAnimToCtx(targetCtx) {
