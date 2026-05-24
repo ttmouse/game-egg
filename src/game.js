@@ -735,6 +735,7 @@ function showPetDetail(idx) {
     <div style="display:flex;gap:8px;margin-top:10px">
       <button onclick="doSynthesize()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">← 返回列表</button>
       <button onclick="closeOverlay()" style="flex:1;padding:8px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">关闭</button>
+      <button onclick="showRenamePet(${idx})" style="flex:1;padding:8px;background:#2a2a1a;border:2px solid #FFD700;color:#FFD700;cursor:pointer">✏️ 改名</button>
       <button onclick="confirmBanishPet(${idx})" style="flex:1;padding:8px;background:#2a1a1a;border:2px solid #f55;color:#faa;cursor:pointer">👋 放逐</button>
     </div>`;
   overlay.classList.add('show');
@@ -4644,6 +4645,42 @@ window.releasePet = function(idx) {
     closeOverlay();
   }
   showToast(`${pet.name} 回到了大自然...`);
+};
+
+window.showRenamePet = function(idx) {
+  const pet = g.pets[idx];
+  if (!pet) return;
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('overlayMsg');
+  msg.innerHTML = `<div class="title">✏️ 改名</div>
+    <div style="margin:12px 0;text-align:center">
+      <div style="color:#aaa;font-size:13px;margin-bottom:8px">为 <span style="color:${STAR_COLORS[pet.star]}">${pet.name}</span> 输入新名字</div>
+      <input id="renameInput" type="text" value="${pet.name}" maxlength="10" style="
+        width:80%;padding:10px;font-size:16px;background:#1a1a2e;border:2px solid #FFD700;border-radius:6px;
+        color:#fff;text-align:center;outline:none;font-family:monospace;
+      ">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button onclick="doRenamePet(${idx})" style="flex:1;padding:10px;background:#2a2a1a;border:2px solid #FFD700;color:#FFD700;cursor:pointer">确认改名</button>
+      <button onclick="showPetDetail(${idx})" style="flex:1;padding:10px;background:#222;border:2px solid #555;color:#fff;cursor:pointer">取消</button>
+    </div>`;
+  overlay.classList.add('show');
+  setTimeout(() => {
+    const inp = document.getElementById('renameInput');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 50);
+};
+
+window.doRenamePet = function(idx) {
+  const inp = document.getElementById('renameInput');
+  if (!inp) return;
+  const newName = inp.value.trim();
+  if (!newName) { showToast('名字不能为空'); return; }
+  const pet = g.pets[idx];
+  if (!pet) return;
+  pet.name = newName;
+  saveGame();
+  showPetDetail(idx);
 };
 
 window.confirmBanishPet = function(idx) {
