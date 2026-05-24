@@ -1489,6 +1489,14 @@ function setupInput(canvasEl) {
   canvasEl.addEventListener('mousedown', (e) => {
     if (g.sceneTransition.active) return;
     const { x, y } = getCoords(e);
+    // 排球 Auto 按钮点击
+    if (g.interactGame === 'volleyball' && volleyGame && volleyGame._autoBtn && volleyGame.state === 'serve') {
+      const btn = volleyGame._autoBtn;
+      if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+        toggleAutoVolley();
+        return;
+      }
+    }
     // 排球拖拽发球
     if (g.interactGame === 'volleyball') { onVolleyDragStart(x, y); return; }
     // 扔球拖拽
@@ -2611,8 +2619,11 @@ window.startVolleyballGame = function() {
     netTop: 340,
     groundY: 470,
     winScore: 5,
+    autoServe: false,    // 自动发球模式
+    autoServeTimer: 0,   // 自动发球倒计时
   };
   g.interactGame = 'volleyball';
+  updateBtnUI();
   resetBallToServer();
 }
 
@@ -2632,6 +2643,18 @@ function resetBallToServer() {
   vg.state = 'serve';
   vg.dragStart = null;
   vg.dragEnd = null;
+}
+
+function toggleAutoVolley() {
+  if (!volleyGame || volleyGame.state !== 'serve') return;
+  const vg = volleyGame;
+  vg.autoServe = !vg.autoServe;
+  if (vg.autoServe) {
+    vg.autoServeTimer = 3; // 3秒后自动发球
+  } else {
+    vg.autoServeTimer = 0;
+  }
+  playSound('pet');
 }
 
 function updateVolleyball(dt) {
@@ -2681,6 +2704,25 @@ function updateVolleyball(dt) {
   }
 
   if (vg.state === 'serve') {
+    // 自动发球模式：倒计时结束后自动发球
+    if (vg.autoServe) {
+      vg.autoServeTimer -= dt;
+      if (vg.autoServeTimer <= 0) {
+        // 自动发球：向对方半场打出一个合适的球
+        const server = vg.serveSide;
+        const receiver = 1 - server;
+        const targetX = server === 0 ? (320 + Math.random() * 200) : (200 + Math.random() * 200);
+        const angle = Math.atan2(-350, (targetX - vg.ball.x));
+        const power = 450 + Math.random() * 150;
+        vg.ball.vx = Math.cos(angle) * power * (server === 0 ? 1 : -1);
+        vg.ball.vy = -Math.sin(angle) * power;
+        vg.state = 'fly';
+        vg.catchTarget = [null, null];
+        vg.catchTarget[receiver] = { x: targetX, y: 300 + Math.random() * 100 };
+        vg.catchTarget[server] = { x: server === 0 ? 120 : 600, y: 400 };
+        playSound('pet');
+      }
+    }
     // 等待拖拽发球
   } else if (vg.state === 'fly') {
     const b = vg.ball;
@@ -2848,6 +2890,7 @@ function endVolleyballGame() {
   volleyGame = null;
   g.interactGame = null;
   selectedInteractPets = [];
+  updateBtnUI();
 }
 
 function drawVolleyballGame(ctx) {
@@ -2963,6 +3006,31 @@ function drawVolleyballGame(ctx) {
   ctx.moveTo(b.x, b.y - 12);
   ctx.lineTo(b.x, b.y + 12);
   ctx.stroke();
+
+  // Auto 按钮（发球状态时显示）
+  if (vg.state === 'serve') {
+    const btnX = 620, btnY = 18, btnW = 56, btnH = 28;
+    vg._autoBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+    ctx.fillStyle = vg.autoServe ? '#4CAF50' : '#555';
+    ctx.strokeStyle = vg.autoServe ? '#2E7D32' : '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('Auto', btnX + 16, btnY + 18);
+
+    // 自动发球倒计时显示
+    if (vg.autoServe) {
+      ctx.fillStyle = '#FFD700';
+      ctx.font = '11px monospace';
+      ctx.fillText(`⏱ ${Math.ceil(vg.autoServeTimer)}s`, btnX - 38, btnY + 18);
+    }
+  } else {
+    vg._autoBtn = null;
+  }
 
   // 提示
   if (vg.state === 'done') {
