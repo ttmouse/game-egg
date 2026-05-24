@@ -10,7 +10,7 @@ import {
 } from './config.js';
 import { initAudio, playSound, soundSynth } from './audio.js';
 import { drawText, drawTextToCtx } from './utils.js';
-import { drawIsoGround, isoToScreen, screenToIso, drawSunMoonToCtx } from './render/ground.js';
+import { drawIsoGround, isoToScreen, drawSunMoonToCtx } from './render/ground.js';
 import { drawIncubator, drawIncubatorToCtx, drawEgg, drawEggToCtx, drawHatchingAnim, drawHatchingAnimToCtx } from './render/egg.js';
 import { drawPetSprite } from './render/pet_sprite.js';
 
@@ -28,6 +28,17 @@ let battlePetTeam = {}
 let battleState = null
 
 let toolParticles = []; // 道具粒子效果
+
+// 可复用的宠物精灵离线画布（避免每帧 new canvas 的 GC 压力）
+let _reusableSpriteCanvas = null;
+function _getSpriteCanvas() {
+  if (!_reusableSpriteCanvas) {
+    _reusableSpriteCanvas = document.createElement('canvas');
+    _reusableSpriteCanvas.width = 48;
+    _reusableSpriteCanvas.height = 48;
+  }
+  return _reusableSpriteCanvas;
+}
 
 function getPetSpriteCanvas(pet) {
   if (!pet) return null;
@@ -105,14 +116,16 @@ function drawPet(pet, x, y, options = {}) {
     walkBob += -Math.abs(Math.sin(pet._landBounce * 10)) * 3 * pet._landBounce;
   }
 
-  const petCanvas = document.createElement('canvas');
-  petCanvas.width = 48;
-  petCanvas.height = 48;
+  const petCanvas = _getSpriteCanvas();
   drawPetSprite(petCanvas, pet, g.lastTs / 1000, pet._speedFactor || 0, pet._walkPhase || 0);
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale + offsetY + walkBob, 48 * scale, 48 * scale);
+  // 取整 drawImage 坐标，防止亚像素定位导致浏览器产生半透明边缘
+  const destW = Math.round(48 * scale), destH = Math.round(48 * scale);
+  const destX = Math.round(basePx - 24 * scale);
+  const destY = Math.round(basePy - 24 * scale + offsetY + walkBob);
+  ctx.drawImage(petCanvas, destX, destY, destW, destH);
   ctx.restore();
 
   // Mood bubble
@@ -176,14 +189,15 @@ function drawPetToCtx(targetCtx, pet, x, y, options = {}) {
     targetCtx.restore();
   }
 
-  const petCanvas = document.createElement('canvas');
-  petCanvas.width = 48;
-  petCanvas.height = 48;
+  const petCanvas = _getSpriteCanvas();
   drawPetSprite(petCanvas, pet, g.lastTs / 1000, pet._speedFactor || 0, pet._walkPhase || 0);
 
   targetCtx.save();
   targetCtx.imageSmoothingEnabled = false;
-  targetCtx.drawImage(petCanvas, basePx - 24 * scale, basePy - 24 * scale, 48 * scale, 48 * scale);
+  const tDestW = Math.round(48 * scale), tDestH = Math.round(48 * scale);
+  const tDestX = Math.round(basePx - 24 * scale);
+  const tDestY = Math.round(basePy - 24 * scale);
+  targetCtx.drawImage(petCanvas, tDestX, tDestY, tDestW, tDestH);
   targetCtx.restore();
 
   // Labels
@@ -210,16 +224,19 @@ export const FOOD_ICONS = {
 
 function drawDroppedFood() {
   g.droppedFood.forEach(f => {
-    const alpha = Math.min(1, f.timer / 10);
-    ctx.globalAlpha = alpha;
-    const drawY = f.y + f.offY;
-    if (f.offY > -10) {
-      ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
+    try {
+      const alpha = Math.min(1, f.timer / 10);
+      ctx.globalAlpha = alpha;
+      const drawY = f.y + f.offY;
+      if (f.offY > -10) {
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(f.x - 6, f.y + 2, 12, 4);
+      }
+      const draw = FOOD_ICONS[f.type];
+      if (draw) draw(f.x, drawY);
+    } finally {
+      ctx.globalAlpha = 1;
     }
-    const draw = FOOD_ICONS[f.type];
-    if (draw) draw(f.x, drawY);
-    ctx.globalAlpha = 1;
   });
 }
 
@@ -359,21 +376,7 @@ function arrangePetsIso() {
     const pos = isoToScreen(col, row);
     pet.scenePos.x = pos.x;
     pet.scenePos.y = pos.y;
-    pet.isoCol = col;
-    pet.isoRow = row;
   });
-}
-
-function snapPetToIsoGrid(pet) {
-  if (!pet || !pet.scenePos) return;
-  const { col, row } = screenToIso(pet.scenePos.x, pet.scenePos.y);
-  const clampedCol = Math.max(0, Math.min(ISO_COLS - 1, col));
-  const clampedRow = Math.max(0, Math.min(ISO_ROWS - 1, row));
-  const pos = isoToScreen(clampedCol, clampedRow);
-  pet.scenePos.x = pos.x;
-  pet.scenePos.y = pos.y;
-  pet.isoCol = clampedCol;
-  pet.isoRow = clampedRow;
 }
 
 // ─── 添加经验 ───
@@ -829,10 +832,6 @@ function updatePetWander(dt) {
       // Sync facing direction with velocity
       if (pet._vx < -0.1) pet.facingRight = false;
       else if (pet._vx > 0.1) pet.facingRight = true;
-
-      const { col, row } = screenToIso(pet.scenePos.x, pet.scenePos.y);
-      pet.isoCol = Math.max(0, Math.min(4, col));
-      pet.isoRow = Math.max(0, Math.min(2, row));
     } else if (!pet.wanderTarget) {
       // Friction deceleration when no target
       pet._vx *= Math.max(0, 1 - friction * dt);
@@ -1095,18 +1094,50 @@ window.toggleCanvasFlip = function() {
 };
 
 function updateBtnUI() {
+  const isIncubator = g.currentScene === 'incubator';
+
   // 更新顶部栏场景标题
   const titleEl = document.getElementById('topSceneTitle');
   if (titleEl) {
-    titleEl.textContent = g.currentScene === 'incubator' ? '🥚 孵蛋室' : '🫂 宠物间';
+    titleEl.textContent = isIncubator ? '🥚 孵蛋室' : '🫂 宠物间';
   }
+
+  // 加热/冰袋状态更新（两场景都需要，切换瞬间立即生效）
   const heatBtn = document.getElementById('btnHeat');
   if (heatBtn) {
     heatBtn.className = 'bt' + (g.heatOn ? ' off' : '');
     document.getElementById('heatStatus').textContent = g.heatOn ? '开启中' : (g.power > 0 ? '开启' : '无电');
   }
-  document.getElementById('btnPet').style.display = g.currentPet ? '' : 'none';
-  document.getElementById('btnFeed').style.display = g.currentPet ? '' : 'none';
+
+  // ─── 场景按钮切换 ───
+  // 孵蛋场景：只显示加热/冰袋
+  // 宠物场景：显示其他所有按钮
+  const incubatorOnly = ['btnHeat', 'btnIce'];
+  const petOnly = ['btnPet', 'btnFeed', 'btnForage', 'btnBreed', 'btnInteract', 'btnTools', 'btnAlbum', 'btnFlip', 'btnVoice'];
+
+  incubatorOnly.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isIncubator ? '' : 'none';
+  });
+  petOnly.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isIncubator ? 'none' : '';
+  });
+
+  // 分隔符和文字指令行
+  document.querySelectorAll('#btns .btnSep').forEach(el => {
+    el.style.display = isIncubator ? 'none' : '';
+  });
+  const cmdLine = document.querySelector('.cmdInline');
+  if (cmdLine) cmdLine.style.display = isIncubator ? 'none' : '';
+
+  // ─── 宠物场景内二级控制（无宠物时隐藏抚摸/喂食） ───
+  if (!isIncubator) {
+    document.getElementById('btnPet').style.display = g.currentPet ? '' : 'none';
+    document.getElementById('btnFeed').style.display = g.currentPet ? '' : 'none';
+  }
+
+  // ─── 冷却/状态文本更新 ───
   const totalFood = g.inventory.worm + g.inventory.fruit + g.inventory.treat;
   document.getElementById('feedStatus').textContent = totalFood > 0 ? (g.feedCdLeft > 0 ? `${Math.ceil(g.feedCdLeft)}秒` : '可用') : '无食物';
   document.getElementById('petCd').textContent = g.petCdLeft > 0 ? `${Math.ceil(g.petCdLeft)}秒` : '可用';
@@ -1158,7 +1189,7 @@ function loop() {
   // Scene transition rendering
   if (g.sceneTransition.active) {
     console.log('[transition] rendering, progress:', g.sceneTransition.progress.toFixed(2), 'from:', g.sceneTransition.from, 'to:', g.sceneTransition.to);
-    initTransCanvases(canvas);
+    initTransCanvases();
     const p = g.sceneTransition.progress;
     const ease = 1 - Math.pow(1 - p, 3);
     const toPets = g.sceneTransition.to === 'pets';
@@ -1173,7 +1204,7 @@ function loop() {
       if (g.isHatching) drawHatchingAnimToCtx(transOldCtx);
       else drawEggToCtx(transOldCtx);
     } else {
-      const sortedPets = [...g.pets].sort((a, b) => (a.isoCol||0)+(a.isoRow||0) - ((b.isoCol||0)+(b.isoRow||0)));
+      const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
       sortedPets.forEach(pet => {
         if (pet.scenePos) drawPetToCtx(transOldCtx, pet, pet.scenePos.x, pet.scenePos.y - TILE_H / 2, {});
       });
@@ -1188,7 +1219,7 @@ function loop() {
       if (g.isHatching) drawHatchingAnimToCtx(transNewCtx);
       else drawEggToCtx(transNewCtx);
     } else {
-      const sortedPets = [...g.pets].sort((a, b) => (a.isoCol||0)+(a.isoRow||0) - ((b.isoCol||0)+(b.isoRow||0)));
+      const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
       sortedPets.forEach(pet => {
         if (pet.scenePos) drawPetToCtx(transNewCtx, pet, pet.scenePos.x, pet.scenePos.y - TILE_H / 2, {});
       });
@@ -1219,7 +1250,7 @@ function loop() {
           ctx.fillRect(hx - hs/4, hy, hs/2, hs/2);
           ctx.fillRect(hx, hy, hs/2, hs/2);
         });
-        const sortedPets = [...g.pets].sort((a, b) => (a.isoCol||0)+(a.isoRow||0) - ((b.isoCol||0)+(b.isoRow||0)));
+        const sortedPets = [...g.pets].sort((a, b) => (a.scenePos?.y||0) - (b.scenePos?.y||0) || (a.id||0) - (b.id||0));
         sortedPets.forEach(pet => {
           if (pet.scenePos) {
             const feetY = pet.scenePos.y - TILE_H / 2;
@@ -1425,7 +1456,7 @@ function setupInput(canvasEl) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && pet.scenePos) {
         pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
-        pet.scenePos.y = Math.max(40, Math.min(480, y - g.dragOffsetY));
+        pet.scenePos.y = Math.max(290, Math.min(500, y - g.dragOffsetY));
         g.dragMoved = true;
       }
       return;
@@ -1524,7 +1555,7 @@ function setupInput(canvasEl) {
       const pet = g.pets.find(p => p.id === g.draggingPetId);
       if (pet && pet.scenePos) {
         pet.scenePos.x = Math.max(40, Math.min(680, x - g.dragOffsetX));
-        pet.scenePos.y = Math.max(40, Math.min(480, y - g.dragOffsetY));
+        pet.scenePos.y = Math.max(290, Math.min(500, y - g.dragOffsetY));
         g.dragMoved = true;
       }
     }
@@ -2408,7 +2439,7 @@ function drawBallGame(ctx) {
   if (petCanvas) {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(petCanvas, bg.petX - 24, bg.petY - 48, 48, 48);
+    ctx.drawImage(petCanvas, Math.round(bg.petX - 24), Math.round(bg.petY - 48), 48, 48);
     ctx.restore();
   }
 
@@ -2824,7 +2855,7 @@ function drawVolleyballGame(ctx) {
     if (petCanvas) {
       ctx.save();
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(petCanvas, vg.pos[i].x - 24, vg.pos[i].y - 48, 48, 48);
+      ctx.drawImage(petCanvas, Math.round(vg.pos[i].x - 24), Math.round(vg.pos[i].y - 48), 48, 48);
       ctx.restore();
     }
     ctx.fillStyle = STAR_COLORS[vg.pets[i].star] || '#aaa';
@@ -3589,14 +3620,15 @@ function drawArenaPet(ctx, pet, px, py, isAttacking, isCurrent) {
   ctx.fill();
 
   // 渲染宠物精灵（与宠物间完全一致，只是放大）
-  const petCanvas = document.createElement('canvas');
-  petCanvas.width = 48;
-  petCanvas.height = 48;
+  const petCanvas = _getSpriteCanvas();
   drawPetSprite(petCanvas, pet, g.lastTs / 1000);
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(petCanvas, px - 24 * spriteScale, py - 24 * spriteScale, 48 * spriteScale, 48 * spriteScale);
+  const bDestW = Math.round(48 * spriteScale), bDestH = Math.round(48 * spriteScale);
+  const bDestX = Math.round(px - 24 * spriteScale);
+  const bDestY = Math.round(py - 24 * spriteScale);
+  ctx.drawImage(petCanvas, bDestX, bDestY, bDestW, bDestH);
   ctx.restore();
 
   // 当前行动者高亮框

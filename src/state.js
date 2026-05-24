@@ -30,18 +30,19 @@ export let transNewCanvas = null;
 export let transOldCtx = null;
 export let transNewCtx = null;
 
-export function initTransCanvases(canvas) {
+export function initTransCanvases() {
   if (!transOldCanvas) {
     transOldCanvas = document.createElement('canvas');
-    transOldCanvas.width = canvas.width;
-    transOldCanvas.height = canvas.height;
+    // 使用逻辑尺寸 720×576，与主画布的坐标系一致
+    transOldCanvas.width = 720;
+    transOldCanvas.height = 576;
     transOldCtx = transOldCanvas.getContext('2d');
     transOldCtx.imageSmoothingEnabled = false;
   }
   if (!transNewCanvas) {
     transNewCanvas = document.createElement('canvas');
-    transNewCanvas.width = canvas.width;
-    transNewCanvas.height = canvas.height;
+    transNewCanvas.width = 720;
+    transNewCanvas.height = 576;
     transNewCtx = transNewCanvas.getContext('2d');
     transNewCtx.imageSmoothingEnabled = false;
   }
