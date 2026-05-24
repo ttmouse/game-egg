@@ -3371,8 +3371,16 @@ function nextBattleTurn() {
         battleState.animPhase = 'animating';
         battleState.turnTimer = 0;
         executeBattleAction();
+      } else if (battleState.autoBattle) {
+        // 自动战斗模式下没有可用动作（对手已全灭），直接结束战斗
+        const opponents = battleState.teamAPetIds.has(battleState.curAttacker.id)
+          ? battleState.teamB : battleState.teamA;
+        if (countAlive(opponents) === 0) {
+          endBattle();
+          return;
+        }
+        // 否则进入 skillSelect 阶段，等待玩家手动选择
       }
-      // 否则进入 skillSelect 阶段，等待玩家手动选择
       return;
     }
   }
@@ -4039,7 +4047,8 @@ function drawBattle(ctx) {
     ctx.font = '14px monospace';
     ctx.fillText('奖励已发放！败者休息1小时', 360 - 110, 285);
 
-    // 按钮
+    // 清空并重新绘制结果按钮
+    window._battleResultBtns = [];
     drawBattleResultBtn(ctx, '🔄 再来一局', 280, 320, () => { exitBattle(); battlePetTeam = {}; setTimeout(() => showBattleSelect(), 100); });
     drawBattleResultBtn(ctx, '🚪 退出', 420, 320, () => { exitBattle(); battlePetTeam = {}; });
   }
