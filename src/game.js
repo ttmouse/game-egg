@@ -1443,9 +1443,17 @@ function setupInput(canvasEl) {
       saveGame();
     }
 
-    // 战斗点击处理（自动战斗，只需处理结果按钮）
+    // 战斗点击处理
     if (g.interactGame === 'battle' && battleState) {
-      // 结果按钮（再来一局 / 退出）
+      // 退出按钮（右上角 ✕）
+      if (battleState._exitBtn) {
+        const eb = battleState._exitBtn;
+        if (mx >= eb.x && mx <= eb.x + eb.w && my >= eb.y && my <= eb.y + eb.h) {
+          exitBattle();
+          return;
+        }
+      }
+      // 结果按钮
       if (battleState.animPhase === 'result' && window._battleResultBtns) {
         for (const btn of window._battleResultBtns) {
           if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
@@ -1453,8 +1461,27 @@ function setupInput(canvasEl) {
             return;
           }
         }
+        return;
       }
-      return;
+      // 技能选择
+      if (battleState.animPhase === 'skillSelect' && battleState.skillBtns) {
+        for (const btn of battleState.skillBtns) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            doBattleSkill(btn.skillKey);
+            return;
+          }
+        }
+      }
+      // 目标选择
+      if (battleState.animPhase === 'targeting' && battleState.targetBtns) {
+        for (const btn of battleState.targetBtns) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            doBattleTarget(btn.petId);
+            return;
+          }
+        }
+      }
+      return; // 战斗中所有点击都由战斗处理
     }
   });
 
@@ -3942,25 +3969,95 @@ function drawBattle(ctx) {
 }
 
 function drawBattleSkillUI(ctx) {
-  // 自动战斗：底部信息已在 drawBattle 的战斗日志区显示，此处仅显示当前行动状态
   if (battleState.animPhase === 'result') return;
-  if (!battleState.curAttacker || !battleState.curSkill || !battleState.curTarget) return;
-  
+  if (!battleState.curAttacker) return;
+
   const attacker = battleState.curAttacker;
-  const skill = battleState.curSkill;
-  const target = battleState.curTarget;
-  
-  ctx.fillStyle = '#FFD700';
-  ctx.font = 'bold 12px monospace';
-  ctx.fillText(`${attacker.name} → ${target.name}：${skill.icon} ${skill.name}`, 16, 414);
-  
-  // 进度条（动画期间显示）
-  if (battleState.animPhase === 'animating' || battleState.animPhase === 'waiting') {
+  const alive = attacker.hp > 0;
+
+  ctx.fillStyle = 'rgba(15,15,30,0.95)';
+  ctx.fillRect(0, 400, 720, 176);
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, 400); ctx.lineTo(720, 400); ctx.stroke();
+
+  if (battleState.animPhase === 'skillSelect' && alive) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(`${attacker.name} 的回合！选择技能：`, 20, 425);
+
+    const skills = getPetSkills(attacker);
+    battleState.skillBtns = [];
+    skills.forEach((skill, i) => {
+      const sx = 20 + i * 175;
+      const sy = 435;
+      const sw = 165;
+      const sh = 60;
+
+      ctx.fillStyle = skill.type === 'heal' ? '#1a3a1a' : '#1a1a3a';
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 2;
+      roundRect(ctx, sx, sy, sw, sh, 6);
+      ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px monospace';
+      ctx.fillText(skill.icon, sx + 8, sy + 22);
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(skill.name, sx + 36, sy + 18);
+      ctx.fillStyle = '#aaa';
+      ctx.font = '10px monospace';
+      ctx.fillText(skill.desc, sx + 36, sy + 34);
+      ctx.fillStyle = skill.type === 'heal' ? '#4CAF50' : '#FF9800';
+      ctx.fillText(skill.type === 'heal' ? '回复30%' : `威力${skill.power}`, sx + 36, sy + 50);
+
+      battleState.skillBtns.push({ skillKey: skill.key, x: sx, y: sy, w: sw, h: sh });
+    });
+  } else if (battleState.animPhase === 'targeting' && battleState.curSkill) {
+    const skill = battleState.curSkill;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('选择目标（' + attacker.name + ' 使用 ' + skill.name + '）：', 20, 425);
+
+    const opponents = battleState.turnOrder.filter(p => p.hp > 0 && p.id !== attacker.id);
+    battleState.targetBtns = [];
+    opponents.forEach((pet, i) => {
+      const sx = 20 + i * 175;
+      const sy = 435;
+      const hpRatio = pet.hp / pet.maxHp;
+      const hpColor = getHpColor(hpRatio);
+
+      ctx.fillStyle = '#1a1a3a';
+      ctx.strokeStyle = '#E53935';
+      ctx.lineWidth = 2;
+      roundRect(ctx, sx, sy, 165, 60, 6);
+      ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(pet.name, sx + 8, sy + 18);
+      ctx.font = '10px monospace';
+      ctx.fillStyle = hpColor;
+      ctx.fillText('HP ' + pet.hp + '/' + pet.maxHp, sx + 8, sy + 36);
+
+      ctx.fillStyle = '#333';
+      ctx.fillRect(sx + 8, sy + 42, 140, 8);
+      ctx.fillStyle = hpColor;
+      ctx.fillRect(sx + 8, sy + 42, Math.round(140 * hpRatio), 8);
+
+      battleState.targetBtns.push({ petId: pet.id, x: sx, y: sy, w: 165, h: 60 });
+    });
+  } else if (battleState.animPhase === 'animating' || battleState.animPhase === 'waiting') {
+    ctx.fillStyle = '#aaa';
+    ctx.font = '13px monospace';
+    if (battleState.curSkill && battleState.curTarget) {
+      ctx.fillText(attacker.name + ' 对 ' + battleState.curTarget.name + ' 使用了 ' + battleState.curSkill.name + '...', 20, 425);
+    }
     const prog = Math.min(1, battleState.turnTimer / 1.0);
     ctx.fillStyle = '#333';
-    ctx.fillRect(16, 418, 200, 8);
+    ctx.fillRect(20, 435, 680, 12);
     ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(16, 418, Math.round(200 * prog), 8);
+    ctx.fillRect(20, 435, Math.round(680 * prog), 12);
   }
 }
 
