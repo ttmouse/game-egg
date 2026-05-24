@@ -2644,9 +2644,9 @@ function updateVolleyball(dt) {
   if ((vg.state === 'fly' || vg.state === 'hit') && !vg.ball.dragging) {
     const receiver = 1 - vg.serveSide;
     const rp = vg.pos[receiver];
-    // 宠物到达 ball 位置的预估时间（按移动速度 200px/s）
+    // 宠物到达 ball 位置的预估时间（按移动速度 350px/s）
     const distToBall = Math.sqrt((vg.ball.x - rp.x) ** 2 + (vg.ball.y - rp.y) ** 2);
-    const timeToReach = Math.max(0.2, distToBall / 220);
+    const timeToReach = Math.max(0.15, distToBall / 350);
     const predicted = predictBallAt(vg.ball, timeToReach, vg.gravity, vg.netX, vg.netTop, vg.groundY);
     // 接球目标：预测球位置，但 y 不低于 120（宠物能跳很高来接）
     vg.catchTarget = vg.catchTarget || [null, null];
@@ -2663,11 +2663,11 @@ function updateVolleyball(dt) {
     if (target) {
       const dx = target.x - p.x;
       if (Math.abs(dx) > 5) {
-        p.x += (dx > 0 ? 1 : -1) * Math.min(Math.abs(dx), 200 * dt);
+        p.x += (dx > 0 ? 1 : -1) * Math.min(Math.abs(dx), 350 * dt);
       }
       const dy = target.y - p.y;
       if (Math.abs(dy) > 5) {
-        p.y += (dy > 0 ? 1 : -1) * Math.min(Math.abs(dy), 150 * dt);
+        p.y += (dy > 0 ? 1 : -1) * Math.min(Math.abs(dy), 280 * dt);
       }
       // 边界
       if (i === 0) {
@@ -2737,10 +2737,10 @@ function updateVolleyball(dt) {
       vg.state = 'hit';
       vg.rallyCount++;
       playSound('pet');
-      // 计算反弹方向：向对方半场打，更高更猛
+      // 计算反弹方向：向对方半场打，更高更猛（降低速度让AI更能接住）
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-420, (targetX - rp.x));
-      const speed = 480 + Math.random() * 180;
+      const angle = Math.atan2(-380, (targetX - rp.x));
+      const speed = 400 + Math.random() * 150;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       // 交换发球方
@@ -2807,8 +2807,8 @@ function updateVolleyball(dt) {
       vg.rallyCount++;
       playSound('pet');
       const targetX = receiver === 0 ? 550 : 170;
-      const angle = Math.atan2(-420, (targetX - rp.x));
-      const speed = 480 + Math.random() * 180;
+      const angle = Math.atan2(-380, (targetX - rp.x));
+      const speed = 400 + Math.random() * 150;
       b.vx = Math.cos(angle) * speed * (receiver === 0 ? 1 : -1);
       b.vy = Math.sin(angle) * speed;
       vg.serveSide = receiver;
